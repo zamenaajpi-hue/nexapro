@@ -1,0 +1,330 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id             String        @id @default(uuid())
+  email          String?       @unique
+  phoneNumber    String?
+  normalizedPhone String?      @unique
+  nickname       String        @unique
+  nexaId         String?       @unique
+  passwordHash   String?
+  avatarColor    String
+  avatarImage    String?
+  initials       String?
+  publicKey      String?
+  bio            String?
+  firstName      String?
+  lastName       String?
+  dateOfBirth    String?
+  activityStatus String?
+  role           String        @default("user")
+  balance        Float         @default(0)
+  ownedAvatars   String        @default("[]")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  messagesSent   Message[]     @relation("SentMessages")
+  groupsJoined   GroupMember[]
+  groupsCreated  Group[]       @relation("CreatedGroups")
+  reactions      Reaction[]
+  pushTokens     PushToken[]
+  stories        Story[]         @relation("UserStories")
+  storyViews     StoryView[]     @relation("UserStoryViews")
+  storyReactions StoryReaction[] @relation("UserStoryReactions")
+  
+  createdChannels Channel[]       @relation("CreatedChannels")
+  channelMembers  ChannelMember[]
+  channelPosts    ChannelPost[]
+  channelReactions ChannelReaction[]
+  chatStates      ChatState[]
+  messageReceipts MessageReceipt[]
+  createdPolls    Poll[]          @relation("CreatedPolls")
+  savedMessages   SavedMessage[]
+  uploadedFiles   UploadedFile[]
+}
+
+model Story {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation("UserStories", fields: [userId], references: [id], onDelete: Cascade)
+  mediaUrl      String
+  mediaType     String   // image, video
+  caption       String?
+  privacy       String   @default("PUBLIC") // PUBLIC, CONTACTS, CLOSE_FRIENDS, CUSTOM
+  expiresAt     DateTime
+  allowedUsers  String?  // JSON string of user IDs for CUSTOM privacy
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  isArchived    Boolean  @default(false)
+  isHighlight   Boolean  @default(false)
+  highlightName String?
+
+  views         StoryView[]     @relation("StoryViewsRel")
+  reactions     StoryReaction[] @relation("StoryReactionsRel")
+}
+
+model StoryView {
+  id        String   @id @default(uuid())
+  storyId   String
+  userId    String
+  story     Story    @relation("StoryViewsRel", fields: [storyId], references: [id], onDelete: Cascade)
+  user      User     @relation("UserStoryViews", fields: [userId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
+
+  @@unique([storyId, userId])
+}
+
+model StoryReaction {
+  id        String   @id @default(uuid())
+  storyId   String
+  userId    String
+  emoji     String
+  story     Story    @relation("StoryReactionsRel", fields: [storyId], references: [id], onDelete: Cascade)
+  user      User     @relation("UserStoryReactions", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([storyId, userId, emoji])
+}
+
+
+model AvatarItem {
+  id        String   @id @default(uuid())
+  name      String
+  imageUrl  String
+  price     Float
+  createdAt DateTime @default(now())
+}
+
+model Group {
+  id          String        @id @default(uuid())
+  name        String
+  description String?
+  avatarColor String
+  avatarImage String?
+  initials    String?
+  inviteLink  String?       @unique
+  isPublic    Boolean       @default(false)
+  creatorId   String
+  creator     User          @relation("CreatedGroups", fields: [creatorId], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  members     GroupMember[]
+  messages    Message[]     @relation("GroupMessages")
+}
+
+model GroupMember {
+  id        String   @id @default(uuid())
+  userId    String
+  groupId   String
+  role      String   @default("member") // owner, admin, member
+  isCoOwner Boolean  @default(false) // keeping for backward compatibility
+  user      User     @relation(fields: [userId], references: [id])
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  @@unique([userId, groupId])
+}
+
+model Channel {
+  id          String          @id @default(uuid())
+  name        String
+  description String?
+  avatarColor String
+  avatarImage String?
+  initials    String?
+  ownerId     String
+  owner       User            @relation("CreatedChannels", fields: [ownerId], references: [id])
+  inviteLink  String?         @unique
+  isPublic    Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  members     ChannelMember[]
+  posts       ChannelPost[]
+}
+
+model ChannelMember {
+  id        String   @id @default(uuid())
+  userId    String
+  channelId String
+  role      String   @default("subscriber") // owner, admin, subscriber
+  user      User     @relation(fields: [userId], references: [id])
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  @@unique([userId, channelId])
+}
+
+model ChannelPost {
+  id          String  @id @default(uuid())
+  channelId   String
+  authorId    String
+  content     String?
+  attachments String? // JSON array of urls
+  views       Int     @default(0)
+  isPinned    Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  channel     Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author      User    @relation(fields: [authorId], references: [id])
+
+  reactions   ChannelReaction[]
+}
+
+model ChannelReaction {
+  id        String      @id @default(uuid())
+  emoji     String
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  postId    String
+  post      ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId, emoji])
+}
+
+
+model Message {
+  id        String   @id @default(uuid())
+  text      String?
+  type      String   @default("text") // text, image, video, audio
+  data      String? // URL to media
+  timestamp DateTime @default(now())
+
+  fromId String
+  from   User   @relation("SentMessages", fields: [fromId], references: [id])
+
+  // Recipient can be a User or a Group
+  toUserId  String?
+  toGroupId String?
+  toGroup   Group?  @relation("GroupMessages", fields: [toGroupId], references: [id])
+
+  replyToId String?
+  replyTo   Message?  @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies   Message[] @relation("MessageReplies")
+
+  status    String     @default("sent")
+  isPinned  Boolean    @default(false)
+  isEdited  Boolean    @default(false)
+  reactions Reaction[]
+  receipts  MessageReceipt[]
+  saves     SavedMessage[]
+
+  @@index([toUserId])
+  @@index([toGroupId])
+}
+
+model Reaction {
+  id        String  @id @default(uuid())
+  emoji     String
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id])
+
+  @@unique([userId, messageId, emoji])
+}
+
+model PushToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String   @default("android") // android, web, ios
+  createdAt DateTime @default(now())
+}
+
+model ChatState {
+  id         String    @id @default(uuid())
+  userId     String
+  chatId     String
+  chatType   String    // direct, group, channel
+  unread     Int       @default(0)
+  mutedUntil DateTime?
+  pinned     Boolean   @default(false)
+  archived   Boolean   @default(false)
+  lastReadAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chatId, chatType])
+  @@index([userId, updatedAt])
+}
+
+model MessageReceipt {
+  id          String    @id @default(uuid())
+  messageId   String
+  userId      String
+  deliveredAt DateTime?
+  readAt      DateTime?
+
+  message     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId, readAt])
+}
+
+model Poll {
+  id        String    @id @default(uuid())
+  chatId    String
+  chatType  String    @default("group") // direct, group, channel
+  creatorId String
+  question  String
+  options   String    // JSON
+  isAnon    Boolean   @default(false)
+  multiple  Boolean   @default(false)
+  closesAt  DateTime?
+  createdAt DateTime  @default(now())
+
+  creator   User      @relation("CreatedPolls", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, chatType])
+}
+
+model SavedMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  messageId String
+  note      String?
+  tags      String?  // JSON
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+}
+
+model CloseFriend {
+  id        String   @id @default(uuid())
+  ownerId   String
+  friendId  String
+  createdAt DateTime @default(now())
+
+  @@unique([ownerId, friendId])
+  @@index([friendId])
+}
+
+model UploadedFile {
+  id           String   @id @default(uuid())
+  userId       String
+  fileName     String
+  originalName String?
+  mimeType     String
+  size         Int
+  url          String
+  storage      String   @default("local")
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}

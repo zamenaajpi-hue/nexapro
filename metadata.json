@@ -1,0 +1,11 @@
+{
+  "name": "NEXA Messenger",
+  "description": "Fast, secure, and intelligent messenger for 2026. Real-time chat, groups, and media sharing.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

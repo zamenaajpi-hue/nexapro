@@ -24,7 +24,7 @@ export const LaunchSplash: React.FC = () => {
     <div className={`launch-splash ${leaving ? 'launch-splash-leaving' : ''}`}>
       <div className="launch-splash-bg" />
       <div className="launch-splash-content">
-        <NexaLogo size={140} showText={false} animated />
+        <NexaLogo size={140} showText={false} />
         <div className="launch-splash-title">NEXA</div>
         <div className="launch-splash-line">
           <span />

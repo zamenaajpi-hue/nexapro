@@ -1,14 +1,34 @@
 import React from 'react';
 
-export const NexaLogo = ({ className = '', size = 52, showText = true, tagline = 'FAST • SECURE • INTELLIGENT' }: { className?: string; size?: number; showText?: boolean; tagline?: string }) => (
-  <div className={`logo ${className}`} style={{ gap: size * 0.25, justifyContent: showText ? 'flex-start' : 'center' }}>
-    <div className="logo-icon" style={{ width: size, height: size, borderRadius: Math.round(size * 0.28), background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '1px' }}>
-      <img src="/logo.jpg" alt="Nexa Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} referrerPolicy="no-referrer" />
+type NexaLogoProps = {
+  className?: string;
+  size?: number;
+  showText?: boolean;
+  tagline?: string;
+  animated?: boolean;
+};
+
+export const NexaLogo = ({
+  className = '',
+  size = 52,
+  showText = true,
+  tagline = 'FAST • SECURE • INTELLIGENT',
+  animated = false,
+}: NexaLogoProps) => (
+  <div
+    className={`logo nexa-logo ${animated ? 'nexa-logo-animated' : ''} ${className}`}
+    style={{ gap: size * 0.24, justifyContent: showText ? 'flex-start' : 'center' }}
+  >
+    <div
+      className="logo-icon nexa-logo-mark"
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }}
+    >
+      <img src="/nexa-logo.svg" alt="Nexa Messenger" />
     </div>
     {showText && (
-      <div className="brand">
-        <h1 style={{ fontSize: `${size * 0.45}px`, letterSpacing: `${Math.round(size * 0.08)}px` }}>NEXA</h1>
-        <small style={{ fontSize: `${size * 0.22}px`, letterSpacing: `${Math.round(size * 0.03)}px` }}>{tagline}</small>
+      <div className="brand nexa-logo-wordmark">
+        <h1 style={{ fontSize: `${size * 0.45}px`, letterSpacing: `${Math.max(1, Math.round(size * 0.07))}px` }}>NEXA</h1>
+        <small style={{ fontSize: `${size * 0.19}px`, letterSpacing: `${Math.max(1, Math.round(size * 0.025))}px` }}>{tagline}</small>
       </div>
     )}
   </div>

@@ -1,10 +1,11 @@
 const PRIMARY_STORAGE_KEY = 'nexa_server_url';
 const LEGACY_STORAGE_KEY = 'SERVER_URL';
+export const DEFAULT_SERVER_URL = 'http://64.188.67.71:3000';
 
 const cleanUrl = (url: string): string => url.trim().replace(/\/$/, '');
 
 export const readStoredServerUrl = (): string => {
-  if (typeof window === 'undefined') return '';
+  if (typeof window === 'undefined') return DEFAULT_SERVER_URL;
 
   try {
     const primary = localStorage.getItem(PRIMARY_STORAGE_KEY);
@@ -19,10 +20,10 @@ export const readStoredServerUrl = (): string => {
     const sessionLegacy = sessionStorage.getItem(LEGACY_STORAGE_KEY);
     if (sessionLegacy) return cleanUrl(sessionLegacy);
   } catch {
-    // Ignore storage access issues and fall back to an empty URL.
+    // Ignore storage access issues and fall back to the production server.
   }
 
-  return '';
+  return DEFAULT_SERVER_URL;
 };
 
 export const saveStoredServerUrl = (url: string): string => {
@@ -41,4 +42,3 @@ export const saveStoredServerUrl = (url: string): string => {
 
   return normalized;
 };
-

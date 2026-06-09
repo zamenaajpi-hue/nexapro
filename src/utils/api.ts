@@ -19,6 +19,9 @@ export function getBaseUrl(): string {
 }
 
 export function resolveApiUrl(path: string): string {
+  if (/^(https?:|blob:|data:)/i.test(path)) {
+    return path;
+  }
   const base = getBaseUrl();
   const cleanPath = path.startsWith('/') ? path : '/' + path;
   return base + cleanPath;

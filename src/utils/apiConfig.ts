@@ -3,7 +3,7 @@
  * Handles server URL configuration for mobile and web platforms
  */
 
-import { readStoredServerUrl, saveStoredServerUrl } from './serverUrl';
+import { DEFAULT_SERVER_URL, readStoredServerUrl, saveStoredServerUrl } from './serverUrl';
 import { fetchHealthCheck } from './nativeHttp';
 
 const isElectron = () => {
@@ -38,9 +38,9 @@ export const initializeServerUrl = async (): Promise<string> => {
     return serverUrl;
   }
 
-  // For mobile/electron, URL will be set by user via modal
-  console.log('[API] No server URL configured yet');
-  return '';
+  serverUrl = DEFAULT_SERVER_URL;
+  console.log('[API] Using default production URL:', serverUrl);
+  return serverUrl;
 };
 
 /**
@@ -78,8 +78,8 @@ export const shouldShowServerConfig = (): boolean => {
 export const getApiBase = (): string => {
   const url = getServerUrl();
   if (!url) {
-    console.warn('[API] No server URL configured, using localhost');
-    return 'http://localhost:3000';
+    console.warn('[API] No server URL configured, using default production URL');
+    return DEFAULT_SERVER_URL;
   }
   return url;
 };

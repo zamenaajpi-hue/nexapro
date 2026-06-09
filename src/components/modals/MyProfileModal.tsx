@@ -5,6 +5,7 @@ import { getInitials } from '../../utils/helpers';
 import { COLORS } from '../../shared/constants';
 import { socket } from '../../socket/client';
 import { notifyApp } from '../../utils/notifications';
+import { resolveApiUrl } from '../../utils/api';
 
 import { MarketplaceModal } from './MarketplaceModal';
 import { StoryViewer } from '../stories/StoryViewer';
@@ -35,7 +36,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
 
   const fetchArchive = async () => {
     try {
-      const res = await fetch('/api/stories/archive', { headers: { 'Authorization': `Bearer ${localStorage.getItem('nexa_token')}` }});
+      const res = await fetch(resolveApiUrl('/api/stories/archive'), { headers: { 'Authorization': `Bearer ${localStorage.getItem('nexa_token')}` }});
       if (res.ok) {
         const data = await res.json();
         if (data && data.length > 0) {

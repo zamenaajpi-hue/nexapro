@@ -45,15 +45,14 @@ import { CreateChannelModal } from "./components/modals/CreateChannelModal";
 import { ProfileModal } from "./components/modals/ProfileModal";
 import { AdminPanel } from "./components/modals/AdminPanel";
 import { ServerConfigModal } from "./components/ServerConfigModal";
+import { LaunchSplash } from "./components/LaunchSplash";
 import { MessageBubble } from "./entities/message/ui/MessageBubble";
 import { getInitials } from "./utils/helpers";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import SoundUtility from "./utils/sound";
 import { DecryptedText } from "./components/DecryptedText";
-import { MobileServerSetup } from "./components/MobileServerSetup";
-import { isMobileOrCapacitor, resolveApiUrl } from "./utils/api";
+import { resolveApiUrl } from "./utils/api";
 import { enablePushNotifications, disablePushNotifications } from "./utils/pushNotifications";
-import { readStoredServerUrl } from "./utils/serverUrl";
 import { updateSocketUrl } from "./socket/client";
 import type { ChannelPost } from "./types/chat";
 import type { NotificationType } from "./utils/notifications";
@@ -232,10 +231,7 @@ const App: React.FC = () => {
     removeChannel,
   } = useChatStore();
 
-  const [serverConfigured, setServerConfigured] = useState(() => {
-    if (!isMobileOrCapacitor()) return true;
-    return !!readStoredServerUrl();
-  });
+  const [, setServerConfigured] = useState(true);
 
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -2408,12 +2404,13 @@ const App: React.FC = () => {
 
   const typingText = getTypingIndicatorText();
 
-  if (!serverConfigured) {
-    return <MobileServerSetup onConfigured={() => setServerConfigured(true)} />;
-  }
-
   if (!user) {
-    return <AuthPage onAuth={handleAuth} loading={loading} error={error || sessionMessage} />;
+    return (
+      <>
+        <LaunchSplash />
+        <AuthPage onAuth={handleAuth} loading={loading} error={error || sessionMessage} />
+      </>
+    );
   }
 
   return (
@@ -2425,6 +2422,7 @@ const App: React.FC = () => {
       setShowCallsModal={setShowCallsModal}
       setShowContactsModal={setShowContactsModal}
     >
+      <LaunchSplash />
       <div className="toast-stack" aria-live="polite" aria-atomic="true">
         {toasts.map((toast) => (
           <div key={toast.id} className={`toast toast-${toast.type}`}>

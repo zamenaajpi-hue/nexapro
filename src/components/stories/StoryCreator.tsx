@@ -3,6 +3,7 @@ import { X, Image as ImageIcon, Send, Type, Video } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { socket } from '../../socket/client';
 import { notifyApp } from '../../utils/notifications';
+import { resolveApiUrl } from '../../utils/api';
 
 export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void }> = ({ onClose, onCreated }) => {
   const { user } = useChatStore();
@@ -36,7 +37,7 @@ export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void
 
       const token = localStorage.getItem('nexa_token');
       // Upload media
-      const upRes = await fetch('/api/upload', {
+      const upRes = await fetch(resolveApiUrl('/api/upload'), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
@@ -46,7 +47,7 @@ export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void
       const { url } = await upRes.json();
 
       // Create story
-      const createRes = await fetch('/api/stories', {
+      const createRes = await fetch(resolveApiUrl('/api/stories'), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

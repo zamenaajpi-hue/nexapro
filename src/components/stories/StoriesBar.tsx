@@ -5,6 +5,7 @@ import { getInitials } from '../../utils/helpers';
 import { StoryCreator } from './StoryCreator';
 import { StoryViewer } from './StoryViewer';
 import { socket } from '../../socket/client';
+import { resolveApiUrl } from '../../utils/api';
 
 export const StoriesBar: React.FC = () => {
   const { user } = useChatStore();
@@ -25,7 +26,7 @@ export const StoriesBar: React.FC = () => {
     try {
       const token = localStorage.getItem("nexa_token");
       if (!token) return;
-      const res = await fetch("/api/stories/active", {
+      const res = await fetch(resolveApiUrl("/api/stories/active"), {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (res.status === 401) {

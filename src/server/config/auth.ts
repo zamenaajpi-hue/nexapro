@@ -1,9 +1,15 @@
 const DEV_JWT_SECRET = 'dev-only-nexa-secret';
+const WEAK_SECRET_PATTERN = /change[_-]?me|dev[_-]?only|default|example|secret[_-]?key|super[_-]?secret/i;
+
+const isStrongJwtSecret = (secret?: string) => {
+  const value = secret?.trim() || '';
+  return value.length >= 32 && !WEAK_SECRET_PATTERN.test(value);
+};
 
 export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
-  if (secret && secret.trim().length >= 32) {
-    return secret;
+  if (isStrongJwtSecret(secret)) {
+    return secret!.trim();
   }
 
   if (process.env.NODE_ENV === 'production') {

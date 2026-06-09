@@ -91,13 +91,7 @@ export const handleGroups = (io: SocketIOServer, socket: any, onlineUsers: Map<s
         return;
       }
       
-      const { db } = await import('../../services/db');
-      await db.groupMember.create({
-        data: {
-          userId: targetUserId,
-          groupId: groupId
-        }
-      });
+      await groupRepository.addMember(groupId, targetUserId);
       
       const updatedGroup = await groupRepository.findById(groupId, true);
       if (updatedGroup) {

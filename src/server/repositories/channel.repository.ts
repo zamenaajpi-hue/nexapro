@@ -30,6 +30,13 @@ export const channelRepository = {
       include: includeMembers ? { members: { include: { user: true } } } : undefined
     }),
 
+  addMember: async (channelId: string, userId: string) =>
+    db.channelMember.upsert({
+      where: { userId_channelId: { userId, channelId } },
+      update: {},
+      create: { userId, channelId, role: 'subscriber' },
+    }),
+
   deleteWithRelations: async (id: string) => {
     return db.$transaction([
       db.channelMember.deleteMany({ where: { channelId: id } }),

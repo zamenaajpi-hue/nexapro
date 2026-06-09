@@ -34,13 +34,23 @@ export const userRepository = {
     const ownedChannelIds = ownedChannels.map(c => c.id);
     const authoredPostIds = authoredPosts.map(p => p.id);
     const userMessageIds = userMessages.map(m => m.id);
+    const ownedGroupMessages = ownedGroupIds.length
+      ? await db.message.findMany({
+          where: { toGroupId: { in: ownedGroupIds } },
+          select: { id: true }
+        })
+      : [];
+    const deletedMessageIds = Array.from(new Set([
+      ...userMessageIds,
+      ...ownedGroupMessages.map(m => m.id),
+    ]));
 
     return db.$transaction([
       db.reaction.deleteMany({
         where: {
           OR: [
             { userId: id },
-            userMessageIds.length ? { messageId: { in: userMessageIds } } : { id: '__never__' }
+            deletedMessageIds.length ? { messageId: { in: deletedMessageIds } } : { id: '__never__' }
           ]
         }
       }),
@@ -60,17 +70,24 @@ export const userRepository = {
       db.closeFriend.deleteMany({ where: { OR: [{ ownerId: id }, { friendId: id }] } }),
       db.uploadedFile.deleteMany({ where: { userId: id } }),
       db.pushToken.deleteMany({ where: { userId: id } }),
-      db.message.updateMany({ where: { replyToId: { in: userMessageIds } }, data: { replyToId: null } }),
-      db.message.deleteMany({ where: { OR: [{ fromId: id }, { toUserId: id }] } }),
+      deletedMessageIds.length
+        ? db.message.updateMany({ where: { replyToId: { in: deletedMessageIds } }, data: { replyToId: null } })
+        : db.message.updateMany({ where: { id: '__never__' }, data: { replyToId: null } }),
+      db.message.deleteMany({
+        where: {
+          OR: [
+            { fromId: id },
+            { toUserId: id },
+            ownedGroupIds.length ? { toGroupId: { in: ownedGroupIds } } : { id: '__never__' }
+          ]
+        }
+      }),
       db.channelPost.deleteMany({ where: { authorId: id } }),
       db.channelMember.deleteMany({ where: { userId: id } }),
       db.groupMember.deleteMany({ where: { userId: id } }),
       ownedChannelIds.length
         ? db.channel.deleteMany({ where: { id: { in: ownedChannelIds } } })
         : db.channel.deleteMany({ where: { id: '__never__' } }),
-      ownedGroupIds.length
-        ? db.message.deleteMany({ where: { toGroupId: { in: ownedGroupIds } } })
-        : db.message.deleteMany({ where: { id: '__never__' } }),
       ownedGroupIds.length
         ? db.group.deleteMany({ where: { id: { in: ownedGroupIds } } })
         : db.group.deleteMany({ where: { id: '__never__' } }),

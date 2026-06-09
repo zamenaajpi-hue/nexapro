@@ -142,6 +142,197 @@ body::after {
     z-index: 2;
 }
 
+.nexa-logo {
+    min-width: 0;
+}
+
+.nexa-logo-mark {
+    background: rgba(3, 7, 18, 0.72) !important;
+    border: 1px solid rgba(103, 232, 249, 0.32);
+    box-shadow:
+        0 0 22px rgba(33, 216, 255, 0.34),
+        inset 0 0 18px rgba(124, 92, 255, 0.2);
+    padding: 0 !important;
+    isolation: isolate;
+}
+
+.nexa-logo-mark::before {
+    display: none;
+}
+
+.nexa-logo-mark img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.nexa-logo-wordmark {
+    min-width: 0;
+}
+
+.nexa-logo-wordmark h1 {
+    line-height: 0.92;
+}
+
+.nexa-logo-wordmark small {
+    white-space: nowrap;
+    color: rgba(103, 232, 249, 0.72);
+}
+
+.nexa-logo-animated .nexa-logo-mark {
+    animation: nexa-mark-float 2.2s ease-in-out infinite, nexa-mark-glow 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes nexa-mark-float {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-6px) scale(1.035); }
+}
+
+@keyframes nexa-mark-glow {
+    0% {
+        box-shadow:
+            0 0 26px rgba(33, 216, 255, 0.42),
+            0 0 54px rgba(52, 107, 255, 0.24),
+            inset 0 0 18px rgba(124, 92, 255, 0.18);
+    }
+    100% {
+        box-shadow:
+            0 0 42px rgba(33, 216, 255, 0.72),
+            0 0 92px rgba(52, 107, 255, 0.36),
+            inset 0 0 28px rgba(117, 255, 245, 0.24);
+    }
+}
+
+.launch-splash {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: grid;
+    place-items: center;
+    background: #030711;
+    overflow: hidden;
+    animation: launch-splash-enter 0.38s ease-out both;
+}
+
+.launch-splash-bg {
+    position: absolute;
+    inset: -20%;
+    background:
+        radial-gradient(circle at 50% 42%, rgba(33, 216, 255, 0.32), transparent 22%),
+        radial-gradient(circle at 50% 58%, rgba(52, 107, 255, 0.28), transparent 28%),
+        linear-gradient(115deg, #030711 0%, #071426 52%, #030711 100%);
+}
+
+.launch-splash-bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px);
+    background-size: 38px 100%;
+    opacity: 0.18;
+    animation: launch-scan 2.6s linear infinite;
+}
+
+.launch-splash-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    transform: translateY(-10px);
+}
+
+.launch-splash-title {
+    color: #ffffff;
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: 10px;
+    text-shadow: 0 0 22px rgba(33, 216, 255, 0.7);
+}
+
+.launch-splash-line {
+    width: 168px;
+    height: 2px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.launch-splash-line span {
+    display: block;
+    width: 45%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, transparent, #75fff5, #346bff);
+    animation: launch-line 1.15s ease-in-out infinite;
+}
+
+.launch-splash-leaving {
+    animation: launch-splash-exit 0.55s ease-in forwards;
+}
+
+@keyframes launch-splash-enter {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes launch-splash-exit {
+    to {
+        opacity: 0;
+        transform: scale(1.035);
+        pointer-events: none;
+    }
+}
+
+@keyframes launch-line {
+    0% { transform: translateX(-105%); }
+    100% { transform: translateX(230%); }
+}
+
+@keyframes launch-scan {
+    from { transform: translateX(0); }
+    to { transform: translateX(38px); }
+}
+
+.nexa-sidebar-header {
+    min-height: 78px;
+    padding: 14px 16px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: linear-gradient(180deg, rgba(103, 232, 249, 0.08), rgba(255, 255, 255, 0));
+}
+
+.nexa-sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.nexa-menu-button {
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    outline: none;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.nexa-menu-button:hover {
+    color: var(--accent-color);
+    border-color: rgba(103, 232, 249, 0.3);
+    background: rgba(103, 232, 249, 0.08);
+}
+
 .brand {
     display: flex;
     flex-direction: column;

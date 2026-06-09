@@ -1,5 +1,8 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { sendPushToUser } from '../services/push.service';
+import { publicUserDto } from '../utils/safeUser';
+
+export const safeCallUserPayload = (user: any) => publicUserDto(user);
 
 export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<string, any>) => {
   const userId = socket.userId;
@@ -12,7 +15,7 @@ export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<st
     if (sender) {
       const recipientSocket = onlineUsers.get(to)?.socketId;
       if (recipientSocket) {
-        io.to(recipientSocket).emit('call:incoming', { from: sender, type });
+        io.to(recipientSocket).emit('call:incoming', { from: safeCallUserPayload(sender), type });
       } else {
         void sendPushToUser(to, {
           title: `@${callerName} звонит`,

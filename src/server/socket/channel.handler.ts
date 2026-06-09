@@ -82,6 +82,31 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
       console.error('[DB_ERR] Channel update failed:', err);
     }
   });
+
+  socket.on('channel:add-member', async (payload: any) => {
+    try {
+      const { channelId, userId: targetUserId } = payload;
+      if (typeof channelId !== 'string' || typeof targetUserId !== 'string') return;
+      const access = await getChannelAccess(channelId);
+      if (!access.canManage) {
+        socket.emit('error', { message: 'Access denied' });
+        return;
+      }
+
+      await channelRepository.addMember(channelId, targetUserId);
+
+      const updatedChannel = await channelRepository.findById(channelId, true);
+      if (updatedChannel) {
+        updatedChannel.members.forEach((m: any) => {
+          const mSocket = onlineUsers.get(m.userId)?.socketId;
+          if (mSocket) io.to(mSocket).emit('channel:updated', { ...safeChannelPayload(updatedChannel), isChannel: true });
+        });
+      }
+    } catch (err) {
+      console.error('[DB_ERR] Add channel member failed:', err);
+    }
+  });
+
   socket.on('channel:history', async (payload: any) => {
     try {
       const { channelId } = payload;

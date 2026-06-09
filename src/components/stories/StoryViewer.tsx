@@ -3,6 +3,7 @@ import { X, Heart, Flame, Smile, Frown, ThumbsUp } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { getInitials } from '../../utils/helpers';
 import { socket } from '../../socket/client';
+import { resolveApiUrl } from '../../utils/api';
 
 export const StoryViewer: React.FC<{ stories: any[], onClose: () => void, onUpdate: () => void }> = ({ stories, onClose, onUpdate }) => {
   const { user } = useChatStore();
@@ -24,7 +25,7 @@ export const StoryViewer: React.FC<{ stories: any[], onClose: () => void, onUpda
     if (currentStory && currentStory.userId !== user?.id) {
       const hasViewed = currentStory.views?.some((v: any) => v.userId === user?.id);
       if (!hasViewed) {
-        fetch(`/api/stories/${currentStory.id}/view`, {
+        fetch(resolveApiUrl(`/api/stories/${currentStory.id}/view`), {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${localStorage.getItem('nexa_token')}` }
         }).then(() => {
@@ -89,7 +90,7 @@ export const StoryViewer: React.FC<{ stories: any[], onClose: () => void, onUpda
   const handleReact = async (emoji: string) => {
     if (currentStory.userId === user?.id) return;
     try {
-      await fetch(`/api/stories/${currentStory.id}/react`, {
+      await fetch(resolveApiUrl(`/api/stories/${currentStory.id}/react`), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -161,7 +162,7 @@ export const StoryViewer: React.FC<{ stories: any[], onClose: () => void, onUpda
         {isVideo ? (
           <video 
             ref={videoRef}
-            src={currentStory.mediaUrl} 
+            src={resolveApiUrl(currentStory.mediaUrl)} 
             autoPlay 
             playsInline
             onTimeUpdate={handleVideoTimeUpdate}
@@ -169,7 +170,7 @@ export const StoryViewer: React.FC<{ stories: any[], onClose: () => void, onUpda
             style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           />
         ) : (
-          <img src={currentStory.mediaUrl} alt="Story" style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
+          <img src={resolveApiUrl(currentStory.mediaUrl)} alt="Story" style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
         )}
 
         {/* Tap zones */}
@@ -197,7 +198,7 @@ export const StoryViewer: React.FC<{ stories: any[], onClose: () => void, onUpda
               if (e.key === 'Enter' && e.currentTarget.value.trim()) {
                 const text = e.currentTarget.value.trim();
                 socket.emit('message:send', { 
-                  toUserId: currentStory.userId, 
+                  to: currentStory.userId, 
                   text: `Реакция на историю: ${text}` 
                 });
                 

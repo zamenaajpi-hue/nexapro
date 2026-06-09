@@ -105,12 +105,20 @@ var init_user_repository = __esm({
         const ownedChannelIds = ownedChannels.map((c) => c.id);
         const authoredPostIds = authoredPosts.map((p) => p.id);
         const userMessageIds = userMessages.map((m) => m.id);
+        const ownedGroupMessages = ownedGroupIds.length ? await db.message.findMany({
+          where: { toGroupId: { in: ownedGroupIds } },
+          select: { id: true }
+        }) : [];
+        const deletedMessageIds = Array.from(/* @__PURE__ */ new Set([
+          ...userMessageIds,
+          ...ownedGroupMessages.map((m) => m.id)
+        ]));
         return db.$transaction([
           db.reaction.deleteMany({
             where: {
               OR: [
                 { userId: id },
-                userMessageIds.length ? { messageId: { in: userMessageIds } } : { id: "__never__" }
+                deletedMessageIds.length ? { messageId: { in: deletedMessageIds } } : { id: "__never__" }
               ]
             }
           }),
@@ -130,13 +138,20 @@ var init_user_repository = __esm({
           db.closeFriend.deleteMany({ where: { OR: [{ ownerId: id }, { friendId: id }] } }),
           db.uploadedFile.deleteMany({ where: { userId: id } }),
           db.pushToken.deleteMany({ where: { userId: id } }),
-          db.message.updateMany({ where: { replyToId: { in: userMessageIds } }, data: { replyToId: null } }),
-          db.message.deleteMany({ where: { OR: [{ fromId: id }, { toUserId: id }] } }),
+          deletedMessageIds.length ? db.message.updateMany({ where: { replyToId: { in: deletedMessageIds } }, data: { replyToId: null } }) : db.message.updateMany({ where: { id: "__never__" }, data: { replyToId: null } }),
+          db.message.deleteMany({
+            where: {
+              OR: [
+                { fromId: id },
+                { toUserId: id },
+                ownedGroupIds.length ? { toGroupId: { in: ownedGroupIds } } : { id: "__never__" }
+              ]
+            }
+          }),
           db.channelPost.deleteMany({ where: { authorId: id } }),
           db.channelMember.deleteMany({ where: { userId: id } }),
           db.groupMember.deleteMany({ where: { userId: id } }),
           ownedChannelIds.length ? db.channel.deleteMany({ where: { id: { in: ownedChannelIds } } }) : db.channel.deleteMany({ where: { id: "__never__" } }),
-          ownedGroupIds.length ? db.message.deleteMany({ where: { toGroupId: { in: ownedGroupIds } } }) : db.message.deleteMany({ where: { id: "__never__" } }),
           ownedGroupIds.length ? db.group.deleteMany({ where: { id: { in: ownedGroupIds } } }) : db.group.deleteMany({ where: { id: "__never__" } }),
           db.story.deleteMany({ where: { userId: id } }),
           db.user.delete({ where: { id } })
@@ -232,10 +247,15 @@ init_db();
 
 // src/server/config/auth.ts
 var DEV_JWT_SECRET = "dev-only-nexa-secret";
+var WEAK_SECRET_PATTERN = /change[_-]?me|dev[_-]?only|default|example|secret[_-]?key|super[_-]?secret/i;
+var isStrongJwtSecret = (secret) => {
+  const value = secret?.trim() || "";
+  return value.length >= 32 && !WEAK_SECRET_PATTERN.test(value);
+};
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
-  if (secret && secret.trim().length >= 32) {
-    return secret;
+  if (isStrongJwtSecret(secret)) {
+    return secret.trim();
   }
   if (process.env.NODE_ENV === "production") {
     throw new Error("JWT_SECRET must be set to a strong value in production");
@@ -408,8 +428,20 @@ var groupRepository = {
     data,
     include: includeMembers ? { members: { include: { user: true } } } : void 0
   }),
+  addMember: async (groupId, userId) => db.groupMember.upsert({
+    where: { userId_groupId: { userId, groupId } },
+    update: {},
+    create: { userId, groupId, role: "member" }
+  }),
   deleteWithRelations: async (id) => {
+    const messages = await db.message.findMany({
+      where: { toGroupId: id },
+      select: { id: true }
+    });
+    const messageIds = messages.map((message) => message.id);
     return db.$transaction([
+      messageIds.length ? db.reaction.deleteMany({ where: { messageId: { in: messageIds } } }) : db.reaction.deleteMany({ where: { id: "__never__" } }),
+      messageIds.length ? db.message.updateMany({ where: { replyToId: { in: messageIds } }, data: { replyToId: null } }) : db.message.updateMany({ where: { id: "__never__" }, data: { replyToId: null } }),
       db.groupMember.deleteMany({ where: { groupId: id } }),
       db.message.deleteMany({ where: { toGroupId: id } }),
       db.group.delete({ where: { id } })
@@ -1533,13 +1565,7 @@ var handleGroups = (io, socket, onlineUsers) => {
         socket.emit("error", { message: "Access denied" });
         return;
       }
-      const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-      await db2.groupMember.create({
-        data: {
-          userId: targetUserId,
-          groupId
-        }
-      });
+      await groupRepository.addMember(groupId, targetUserId);
       const updatedGroup = await groupRepository.findById(groupId, true);
       if (updatedGroup) {
         updatedGroup.members.forEach((m) => {
@@ -1573,6 +1599,7 @@ var handleGroups = (io, socket, onlineUsers) => {
 };
 
 // src/server/socket/call.handler.ts
+var safeCallUserPayload = (user) => publicUserDto(user);
 var handleCalls = (io, socket, onlineUsers) => {
   const userId = socket.userId;
   socket.on("call:initiate", (payload) => {
@@ -1582,7 +1609,7 @@ var handleCalls = (io, socket, onlineUsers) => {
     if (sender) {
       const recipientSocket = onlineUsers.get(to)?.socketId;
       if (recipientSocket) {
-        io.to(recipientSocket).emit("call:incoming", { from: sender, type });
+        io.to(recipientSocket).emit("call:incoming", { from: safeCallUserPayload(sender), type });
       } else {
         void sendPushToUser(to, {
           title: `@${callerName} \u0437\u0432\u043E\u043D\u0438\u0442`,
@@ -2079,6 +2106,11 @@ var channelRepository = {
     data,
     include: includeMembers ? { members: { include: { user: true } } } : void 0
   }),
+  addMember: async (channelId, userId) => db.channelMember.upsert({
+    where: { userId_channelId: { userId, channelId } },
+    update: {},
+    create: { userId, channelId, role: "subscriber" }
+  }),
   deleteWithRelations: async (id) => {
     return db.$transaction([
       db.channelMember.deleteMany({ where: { channelId: id } }),
@@ -2157,6 +2189,27 @@ var handleChannels = (io, socket, onlineUsers) => {
       });
     } catch (err) {
       console.error("[DB_ERR] Channel update failed:", err);
+    }
+  });
+  socket.on("channel:add-member", async (payload) => {
+    try {
+      const { channelId, userId: targetUserId } = payload;
+      if (typeof channelId !== "string" || typeof targetUserId !== "string") return;
+      const access = await getChannelAccess(channelId);
+      if (!access.canManage) {
+        socket.emit("error", { message: "Access denied" });
+        return;
+      }
+      await channelRepository.addMember(channelId, targetUserId);
+      const updatedChannel = await channelRepository.findById(channelId, true);
+      if (updatedChannel) {
+        updatedChannel.members.forEach((m) => {
+          const mSocket = onlineUsers.get(m.userId)?.socketId;
+          if (mSocket) io.to(mSocket).emit("channel:updated", { ...safeChannelPayload(updatedChannel), isChannel: true });
+        });
+      }
+    } catch (err) {
+      console.error("[DB_ERR] Add channel member failed:", err);
     }
   });
   socket.on("channel:history", async (payload) => {

@@ -173,16 +173,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside className={`sidebar ${isMobileActive ? 'mobile-active' : ''}`}>
-      <div className="sidebar-header" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className="sidebar-header nexa-sidebar-header">
+        <div className="nexa-sidebar-brand">
           <button
             title="Открыть меню"
             onClick={() => setShowMenuDrawer(true)}
-            style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', outline: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '50%', transition: 'background 0.2s' }}
+            className="nexa-menu-button"
           >
             <Menu size={22} />
           </button>
-          <NexaLogo size={34} showText={true} tagline="СЕТЬ" />
+          <NexaLogo size={42} showText={true} tagline="SECURE NETWORK" />
         </div>
       </div>
 

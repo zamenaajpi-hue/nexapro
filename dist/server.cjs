@@ -235,6 +235,7 @@ var import_multer = __toESM(require("multer"), 1);
 var import_pino = __toESM(require("pino"), 1);
 var import_pino_http = __toESM(require("pino-http"), 1);
 var import_prom_client = __toESM(require("prom-client"), 1);
+var import_express_rate_limit = __toESM(require("express-rate-limit"), 1);
 var import_ioredis = require("ioredis");
 var import_redis_adapter = require("@socket.io/redis-adapter");
 var import_child_process = require("child_process");
@@ -551,6 +552,28 @@ var messageRepository = {
         status: "read"
       }
     });
+  },
+  markDeliveredToUser: async (userId) => {
+    const pendingMessages = await db.message.findMany({
+      where: {
+        toUserId: userId,
+        status: "sent"
+      },
+      select: { id: true, fromId: true }
+    });
+    if (pendingMessages.length === 0) {
+      return { count: 0, senderIds: [] };
+    }
+    await db.message.updateMany({
+      where: {
+        id: { in: pendingMessages.map((message) => message.id) }
+      },
+      data: { status: "delivered" }
+    });
+    return {
+      count: pendingMessages.length,
+      senderIds: Array.from(new Set(pendingMessages.map((message) => message.fromId)))
+    };
   }
 };
 
@@ -985,6 +1008,14 @@ var handleMessages = (io, socket, onlineUsers) => {
     const states = await chatStateRepository.findForUser(targetUserId);
     io.to(targetSocket).emit("chat:states", states);
   };
+  const chatStateTargetSchema = import_zod4.z.object({
+    chatId: import_zod4.z.string().min(1),
+    chatType: import_zod4.z.enum(["direct", "group", "channel"])
+  });
+  const updateChatPreferences = async (chatId, chatType, data) => {
+    await chatStateRepository.updatePreferences(userId, chatId, chatType, data);
+    socket.emit("chat:states", await chatStateRepository.findForUser(userId));
+  };
   const isGroupMember = async (groupId) => {
     const group = await groupRepository.findById(groupId, true);
     if (!group) return { allowed: false, group: null };
@@ -1203,14 +1234,46 @@ var handleMessages = (io, socket, onlineUsers) => {
         mutedUntil: import_zod4.z.string().datetime().nullable().optional()
       }).parse(payload);
       const mutedUntil = data.mutedUntil === void 0 ? void 0 : data.mutedUntil ? new Date(data.mutedUntil) : null;
-      await chatStateRepository.updatePreferences(userId, data.chatId, data.chatType, {
+      await updateChatPreferences(data.chatId, data.chatType, {
         pinned: data.pinned,
         archived: data.archived,
         mutedUntil
       });
-      socket.emit("chat:states", await chatStateRepository.findForUser(userId));
     } catch (err) {
       console.error("chat:state:update error:", err);
+    }
+  });
+  socket.on("chat:pin", async (payload) => {
+    try {
+      const data = chatStateTargetSchema.extend({
+        pinned: import_zod4.z.boolean()
+      }).parse(payload);
+      await updateChatPreferences(data.chatId, data.chatType, { pinned: data.pinned });
+    } catch (err) {
+      console.error("chat:pin error:", err);
+    }
+  });
+  socket.on("chat:archive", async (payload) => {
+    try {
+      const data = chatStateTargetSchema.extend({
+        archived: import_zod4.z.boolean()
+      }).parse(payload);
+      await updateChatPreferences(data.chatId, data.chatType, { archived: data.archived });
+    } catch (err) {
+      console.error("chat:archive error:", err);
+    }
+  });
+  socket.on("chat:mute", async (payload) => {
+    try {
+      const data = chatStateTargetSchema.extend({
+        mutedUntil: import_zod4.z.string().datetime().nullable().optional(),
+        muted: import_zod4.z.boolean().optional(),
+        durationMs: import_zod4.z.number().int().positive().max(30 * 24 * 60 * 60 * 1e3).optional()
+      }).parse(payload);
+      const mutedUntil = data.mutedUntil !== void 0 ? data.mutedUntil ? new Date(data.mutedUntil) : null : data.muted === false ? null : new Date(Date.now() + (data.durationMs || 60 * 60 * 1e3));
+      await updateChatPreferences(data.chatId, data.chatType, { mutedUntil });
+    } catch (err) {
+      console.error("chat:mute error:", err);
     }
   });
   socket.on("typing", async (payload) => {
@@ -1701,6 +1764,13 @@ var handleUsers = (io, socket, onlineUsers, socketToUserMap) => {
       const userData = { ...publicUserDto({ ...user, status: "online" }), socketId: socket.id };
       onlineUsers.set(userId, userData);
       socketToUserMap.set(socket.id, userId);
+      const delivered = await messageRepository.markDeliveredToUser(userId);
+      delivered.senderIds.forEach((senderId) => {
+        const senderSocket = onlineUsers.get(senderId)?.socketId;
+        if (senderSocket) {
+          io.to(senderSocket).emit("messages:delivered", { chatId: userId });
+        }
+      });
       io.emit("users:online", publicUsersDto(Array.from(onlineUsers.values())));
       const userGroups = await groupRepository.findForUser(userId);
       const enrichedGroups = userGroups.map((g) => ({ ...safeGroup2(g), isGroup: true }));
@@ -1713,6 +1783,20 @@ var handleUsers = (io, socket, onlineUsers, socketToUserMap) => {
       const enrichedChannels = userChannels.map((c) => ({ ...safeGroup2(c), isChannel: true }));
       socket.emit("channels:update", enrichedChannels);
       const { chatStateRepository: chatStateRepository2 } = await Promise.resolve().then(() => (init_chat_state_repository(), chat_state_repository_exports));
+      const directMessages = await db2.message.findMany({
+        where: {
+          OR: [
+            { fromId: userId, toUserId: { not: null } },
+            { toUserId: userId }
+          ]
+        },
+        select: { fromId: true, toUserId: true },
+        distinct: ["fromId", "toUserId"]
+      });
+      const directPeerIds = Array.from(new Set(
+        directMessages.map((message) => message.fromId === userId ? message.toUserId : message.fromId).filter((peerId) => Boolean(peerId) && peerId !== userId)
+      ));
+      await Promise.all(directPeerIds.map((peerId) => chatStateRepository2.touch(userId, peerId, "direct")));
       socket.emit("chat:states", await chatStateRepository2.findForUser(userId));
     } catch (err) {
       console.error(err);
@@ -2565,31 +2649,6 @@ var normalizePhone3 = (phone) => {
   if (digits.length === 11 && (digits.startsWith("8") || digits.startsWith("7"))) return `7${digits.slice(1)}`;
   return digits;
 };
-var createRateLimiter = ({
-  windowMs,
-  max,
-  message
-}) => {
-  const buckets = /* @__PURE__ */ new Map();
-  return (req, res, next) => {
-    const now = Date.now();
-    const email = typeof req.body?.email === "string" ? req.body.email.toLowerCase().trim() : "";
-    const key = `${req.ip}:${email}`;
-    const bucket = buckets.get(key);
-    if (!bucket || bucket.resetAt <= now) {
-      buckets.set(key, { count: 1, resetAt: now + windowMs });
-      next();
-      return;
-    }
-    if (bucket.count >= max) {
-      res.setHeader("Retry-After", Math.ceil((bucket.resetAt - now) / 1e3));
-      res.status(429).json({ error: message });
-      return;
-    }
-    bucket.count += 1;
-    next();
-  };
-};
 async function startServer() {
   const app = (0, import_express.default)();
   const logger = (0, import_pino.default)({ level: process.env.LOG_LEVEL || "info" });
@@ -2760,15 +2819,19 @@ async function startServer() {
       res.status(500).json({ error: err.message || "Upload failed" });
     }
   });
-  const authRateLimit = createRateLimiter({
+  const authRateLimit = (0, import_express_rate_limit.default)({
     windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1e3,
-    max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 8,
-    message: "Too many authentication attempts. Please try again later."
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 10,
+    message: { error: "Too many attempts" },
+    standardHeaders: true,
+    legacyHeaders: false
   });
-  const aiRateLimit = createRateLimiter({
+  const aiRateLimit = (0, import_express_rate_limit.default)({
     windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS) || 60 * 1e3,
     max: Number(process.env.AI_RATE_LIMIT_MAX) || 12,
-    message: "Too many AI requests. Please try again later."
+    message: { error: "Too many AI requests. Please try again later." },
+    standardHeaders: true,
+    legacyHeaders: false
   });
   app.post("/api/auth/register", authRateLimit, authController.register);
   app.post("/api/auth/login", authRateLimit, authController.login);

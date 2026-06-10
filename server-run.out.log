@@ -1,0 +1,11 @@
+{"level":30,"time":1780860094496,"pid":27548,"hostname":"DESKTOP-J4BB1MH","msg":"Performing database health check..."}
+{"level":30,"time":1780860094780,"pid":27548,"hostname":"DESKTOP-J4BB1MH","msg":"Database health check passed."}
+{"level":30,"time":1780860094796,"pid":27548,"hostname":"DESKTOP-J4BB1MH","msg":"Running in in-memory socket mode (no REDIS_URL provided)"}
+========================================
+      NEXA MESSENGER auth-READY       
+========================================
+Server: Running at http://0.0.0.0:3000
+Time:   2026-06-07T19:21:35.105Z
+Mode:   development
+========================================
+{"level":30,"time":1780860096584,"pid":27548,"hostname":"DESKTOP-J4BB1MH","req":{"id":1,"method":"GET","url":"/api/health","query":{},"params":{},"headers":{"user-agent":"Mozilla/5.0 (Windows NT; Windows NT 10.0; ru-RU) WindowsPowerShell/5.1.26100.8457","host":"localhost:3000","connection":"Keep-Alive"},"remoteAddress":"127.0.0.1","remotePort":62109},"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","access-control-allow-methods":"GET, POST, OPTIONS, PUT, PATCH, DELETE","access-control-allow-headers":"X-Requested-With, Content-Type, Authorization","content-type":"application/json; charset=utf-8","content-length":"38","etag":"W/\"26-wydt0kWEhk7X9jDisfTAI9ZTvo4\""}},"responseTime":5,"msg":"request completed"}

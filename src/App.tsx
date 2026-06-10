@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useRef } from "react";
+import React, { lazy, Suspense, useCallback, useState, useEffect, useRef } from "react";
 import { socket, connectSocket } from "./socket/client";
 import { useChatStore } from "./store/useChatStore";
 import { User, Message, Group, Channel } from "./types/chat";
@@ -36,15 +36,8 @@ import {
 import { COLORS, EMOJIS, STICKERS, VOICE_STICKERS } from "./shared/constants";
 import { NexaLogo } from "./shared/ui/NexaLogo";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { AuthPage } from "./pages/auth/AuthPage";
 import { MainLayout } from "./layouts/MainLayout";
 import { Sidebar } from "./components/sidebar/Sidebar";
-import { MyProfileModal } from "./components/modals/MyProfileModal";
-import { CreateGroupModal } from "./components/modals/CreateGroupModal";
-import { CreateChannelModal } from "./components/modals/CreateChannelModal";
-import { ProfileModal } from "./components/modals/ProfileModal";
-import { AdminPanel } from "./components/modals/AdminPanel";
-import { ServerConfigModal } from "./components/ServerConfigModal";
 import { LaunchSplash } from "./components/LaunchSplash";
 import { MessageBubble } from "./entities/message/ui/MessageBubble";
 import { getInitials } from "./utils/helpers";
@@ -56,6 +49,14 @@ import { enablePushNotifications, disablePushNotifications } from "./utils/pushN
 import { updateSocketUrl } from "./socket/client";
 import type { ChannelPost } from "./types/chat";
 import type { NotificationType } from "./utils/notifications";
+
+const AuthPage = lazy(() => import("./pages/auth/AuthPage").then((module) => ({ default: module.AuthPage })));
+const MyProfileModal = lazy(() => import("./components/modals/MyProfileModal").then((module) => ({ default: module.MyProfileModal })));
+const CreateGroupModal = lazy(() => import("./components/modals/CreateGroupModal").then((module) => ({ default: module.CreateGroupModal })));
+const CreateChannelModal = lazy(() => import("./components/modals/CreateChannelModal").then((module) => ({ default: module.CreateChannelModal })));
+const ProfileModal = lazy(() => import("./components/modals/ProfileModal").then((module) => ({ default: module.ProfileModal })));
+const AdminPanel = lazy(() => import("./components/modals/AdminPanel").then((module) => ({ default: module.AdminPanel })));
+const ServerConfigModal = lazy(() => import("./components/ServerConfigModal").then((module) => ({ default: module.ServerConfigModal })));
 
 type ImportedPhoneContact = {
   id: string;
@@ -1218,6 +1219,17 @@ const App: React.FC = () => {
       setMessages(chatId, updated);
     });
 
+    socket.on("messages:delivered", ({ chatId }) => {
+      const existing = useChatStore.getState().chats[chatId]?.messages || [];
+      const updated = existing.map((m) => {
+        if (m.fromId === user.id && m.status === "sent") {
+          return { ...m, status: "delivered" as const };
+        }
+        return m;
+      });
+      setMessages(chatId, updated);
+    });
+
     socket.on("message:history:result", ({ chatId, messages }) => {
       messages.forEach((msg: Message) => {
         if (msg.fromId === user.id && msg.status !== "read")
@@ -1415,6 +1427,7 @@ const App: React.FC = () => {
       socket.off("message:updated");
       socket.off("message:deleted");
       socket.off("messages:read");
+      socket.off("messages:delivered");
       socket.off("message:history:result");
       socket.off("message:edit:error");
       socket.off("profile:updated");
@@ -2147,7 +2160,6 @@ const App: React.FC = () => {
       avatarColor: editAvatarColor,
       avatarImage: editAvatarImage,
       bio: editBio,
-      role: editRole,
     });
   };
 
@@ -2408,7 +2420,9 @@ const App: React.FC = () => {
     return (
       <>
         <LaunchSplash />
-        <AuthPage onAuth={handleAuth} loading={loading} error={error || sessionMessage} />
+        <Suspense fallback={null}>
+          <AuthPage onAuth={handleAuth} loading={loading} error={error || sessionMessage} />
+        </Suspense>
       </>
     );
   }
@@ -3051,58 +3065,70 @@ const App: React.FC = () => {
 
       {/* Modals */}
       {showGroupModal && (
-        <CreateGroupModal
-          onClose={() => setShowGroupModal(false)}
-          onlineUsers={allUsers.filter((u) => u.id !== user.id)}
-          handleCreateGroup={onCreateGroup}
-        />
+        <Suspense fallback={null}>
+          <CreateGroupModal
+            onClose={() => setShowGroupModal(false)}
+            onlineUsers={allUsers.filter((u) => u.id !== user.id)}
+            handleCreateGroup={onCreateGroup}
+          />
+        </Suspense>
       )}
 
       {showMyProfile && user && (
-        <MyProfileModal
-          onClose={() => setShowMyProfile(false)}
-          user={user}
-          onUpdate={(updatedData) => {
-            socket.emit("profile:update", updatedData);
-          }}
-          handleLogout={handleLogout}
-        />
+        <Suspense fallback={null}>
+          <MyProfileModal
+            onClose={() => setShowMyProfile(false)}
+            user={user}
+            onUpdate={(updatedData) => {
+              socket.emit("profile:update", updatedData);
+            }}
+            handleLogout={handleLogout}
+          />
+        </Suspense>
       )}
 
       {showProfile && profileItem && (
-        <ProfileModal
-          onClose={() => setShowProfile(false)}
-          profileItem={profileItem}
-          onlineUsers={onlineUsers}
-          socket={socket}
-          currentUser={user}
-        />
+        <Suspense fallback={null}>
+          <ProfileModal
+            onClose={() => setShowProfile(false)}
+            profileItem={profileItem}
+            onlineUsers={onlineUsers}
+            socket={socket}
+            currentUser={user}
+          />
+        </Suspense>
       )}
 
-      <ServerConfigModal
-        isVisible={showSettings}
-        onSubmit={(serverUrl) => {
-          updateSocketUrl(serverUrl);
-          setServerConfigured(true);
-          setShowSettings(false);
-        }}
-      />
+      {showSettings && (
+        <Suspense fallback={null}>
+          <ServerConfigModal
+            isVisible={showSettings}
+            onSubmit={(serverUrl) => {
+              updateSocketUrl(serverUrl);
+              setServerConfigured(true);
+              setShowSettings(false);
+            }}
+          />
+        </Suspense>
+      )}
 
       {showAdminPanel && user?.role === "admin" && (
-        <AdminPanel
-          onClose={() => setShowAdminPanel(false)}
-          adminTab={adminTab}
-          setAdminTab={setAdminTab}
-          adminStats={adminStats}
-          adminUsers={adminUsers}
-          adminGroups={adminGroups}
-          adminMessages={adminMessages}
-          currentUser={user}
-          handleToggleUserRole={handleToggleUserRole}
-          handleDeleteUser={handleDeleteUser}
-          handleDeleteGroup={handleDeleteGroup}
-          handleDeleteMessage={handleDeleteMessage}
-        />
+        <Suspense fallback={null}>
+          <AdminPanel
+            onClose={() => setShowAdminPanel(false)}
+            adminTab={adminTab}
+            setAdminTab={setAdminTab}
+            adminStats={adminStats}
+            adminUsers={adminUsers}
+            adminGroups={adminGroups}
+            adminMessages={adminMessages}
+            currentUser={user}
+            handleToggleUserRole={handleToggleUserRole}
+            handleDeleteUser={handleDeleteUser}
+            handleDeleteGroup={handleDeleteGroup}
+            handleDeleteMessage={handleDeleteMessage}
+          />
+        </Suspense>
       )}
 
       {/* ==========================================================================
@@ -4010,10 +4036,12 @@ const App: React.FC = () => {
          CHANNEL CREATOR MODAL
          ========================================================================== */}
       {showChannelModal && (
-        <CreateChannelModal
-          onClose={() => setShowChannelModal(false)}
-          handleCreateChannel={onCreateChannel}
-        />
+        <Suspense fallback={null}>
+          <CreateChannelModal
+            onClose={() => setShowChannelModal(false)}
+            handleCreateChannel={onCreateChannel}
+          />
+        </Suspense>
       )}
 
       {/* ==========================================================================

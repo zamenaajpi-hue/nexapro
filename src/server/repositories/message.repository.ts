@@ -125,5 +125,31 @@ export const messageRepository = {
         status: 'read'
       }
     });
+  },
+
+  markDeliveredToUser: async (userId: string) => {
+    const pendingMessages = await db.message.findMany({
+      where: {
+        toUserId: userId,
+        status: 'sent',
+      },
+      select: { id: true, fromId: true },
+    });
+
+    if (pendingMessages.length === 0) {
+      return { count: 0, senderIds: [] as string[] };
+    }
+
+    await db.message.updateMany({
+      where: {
+        id: { in: pendingMessages.map((message) => message.id) },
+      },
+      data: { status: 'delivered' },
+    });
+
+    return {
+      count: pendingMessages.length,
+      senderIds: Array.from(new Set(pendingMessages.map((message) => message.fromId))),
+    };
   }
 };

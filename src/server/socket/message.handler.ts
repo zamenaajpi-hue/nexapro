@@ -27,6 +27,20 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
     io.to(targetSocket).emit('chat:states', states);
   };
 
+  const chatStateTargetSchema = z.object({
+    chatId: z.string().min(1),
+    chatType: z.enum(['direct', 'group', 'channel']),
+  });
+
+  const updateChatPreferences = async (
+    chatId: string,
+    chatType: ChatType,
+    data: { pinned?: boolean; archived?: boolean; mutedUntil?: Date | null },
+  ) => {
+    await chatStateRepository.updatePreferences(userId, chatId, chatType, data);
+    socket.emit('chat:states', await chatStateRepository.findForUser(userId));
+  };
+
   const isGroupMember = async (groupId: string) => {
     const group = await groupRepository.findById(groupId, true);
     if (!group) return { allowed: false, group: null as any };
@@ -256,14 +270,57 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
       }).parse(payload);
 
       const mutedUntil = data.mutedUntil === undefined ? undefined : data.mutedUntil ? new Date(data.mutedUntil) : null;
-      await chatStateRepository.updatePreferences(userId, data.chatId, data.chatType, {
+      await updateChatPreferences(data.chatId, data.chatType, {
         pinned: data.pinned,
         archived: data.archived,
         mutedUntil,
       });
-      socket.emit('chat:states', await chatStateRepository.findForUser(userId));
     } catch (err) {
       console.error('chat:state:update error:', err);
+    }
+  });
+
+  socket.on('chat:pin', async (payload: any) => {
+    try {
+      const data = chatStateTargetSchema.extend({
+        pinned: z.boolean(),
+      }).parse(payload);
+
+      await updateChatPreferences(data.chatId, data.chatType, { pinned: data.pinned });
+    } catch (err) {
+      console.error('chat:pin error:', err);
+    }
+  });
+
+  socket.on('chat:archive', async (payload: any) => {
+    try {
+      const data = chatStateTargetSchema.extend({
+        archived: z.boolean(),
+      }).parse(payload);
+
+      await updateChatPreferences(data.chatId, data.chatType, { archived: data.archived });
+    } catch (err) {
+      console.error('chat:archive error:', err);
+    }
+  });
+
+  socket.on('chat:mute', async (payload: any) => {
+    try {
+      const data = chatStateTargetSchema.extend({
+        mutedUntil: z.string().datetime().nullable().optional(),
+        muted: z.boolean().optional(),
+        durationMs: z.number().int().positive().max(30 * 24 * 60 * 60 * 1000).optional(),
+      }).parse(payload);
+
+      const mutedUntil = data.mutedUntil !== undefined
+        ? (data.mutedUntil ? new Date(data.mutedUntil) : null)
+        : data.muted === false
+          ? null
+          : new Date(Date.now() + (data.durationMs || 60 * 60 * 1000));
+
+      await updateChatPreferences(data.chatId, data.chatType, { mutedUntil });
+    } catch (err) {
+      console.error('chat:mute error:', err);
     }
   });
 

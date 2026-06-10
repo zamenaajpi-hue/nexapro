@@ -1233,6 +1233,408 @@ input:focus, textarea:focus {
     box-shadow: 0 0 100px rgba(0, 0, 0, 0.5);
 }
 
+.error-message {
+    color: #ff6b6b;
+    margin-bottom: 1rem;
+    font-size: 0.86rem;
+}
+
+.auth-switch-copy {
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    color: var(--accent-color);
+    margin-left: 0.5rem;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.btn-secondary {
+    width: 100%;
+    padding: 0.9rem 1rem;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.profile-modal-content {
+    max-width: 460px !important;
+    padding: 0 !important;
+    overflow-y: auto;
+    border-radius: 16px !important;
+    max-height: 90vh;
+}
+
+.profile-modal-header {
+    padding: 28px 24px;
+    border-bottom: 1px solid var(--border-color);
+    position: relative;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(3, 7, 18, 0.95));
+}
+
+.profile-close-button {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.07);
+    cursor: pointer;
+}
+
+.profile-modal-identity {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.profile-avatar-button {
+    width: 76px !important;
+    height: 76px !important;
+    border-radius: 50% !important;
+    border: 3px solid var(--accent-color);
+    box-shadow: 0 8px 18px rgba(0, 239, 255, 0.15);
+    background-size: cover;
+    background-position: center;
+    cursor: default;
+    color: #fff;
+}
+
+.profile-avatar-button[title] {
+    cursor: pointer;
+}
+
+.profile-avatar-overlay {
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.58);
+    opacity: 1;
+}
+
+.profile-modal-title {
+    min-width: 0;
+}
+
+.profile-modal-title h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1.25;
+}
+
+.profile-modal-title p {
+    margin: 4px 0 8px;
+    font-size: 0.86rem;
+    color: var(--accent-color);
+    font-weight: 700;
+}
+
+.profile-role-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 9px;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.profile-role-admin,
+.profile-role-owner {
+    color: var(--accent-color);
+    border-color: rgba(103, 232, 249, 0.35);
+    background: rgba(103, 232, 249, 0.1);
+}
+
+.profile-modal-body {
+    background: rgba(3, 7, 18, 0.2);
+}
+
+.profile-edit-form,
+.profile-info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.profile-edit-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.profile-edit-form label span,
+.profile-field-label {
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.profile-edit-form input,
+.profile-edit-form textarea {
+    margin-bottom: 0;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.profile-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.profile-color-options {
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.profile-color-options .color-opt {
+    border: 2px solid transparent;
+    background-image: none;
+}
+
+.profile-owned-avatars {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.profile-owned-avatars button {
+    width: 42px;
+    height: 42px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+    background-size: cover;
+    background-position: center;
+    cursor: pointer;
+    font-size: 10px;
+}
+
+.profile-owned-avatars button.active {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+.profile-edit-actions,
+.profile-bottom-actions,
+.modal-footer-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.profile-edit-actions .btn-primary,
+.profile-bottom-actions button,
+.modal-footer-grid .btn-primary,
+.modal-footer-grid .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.profile-info-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.profile-info-row > svg {
+    color: var(--accent-color);
+    flex-shrink: 0;
+}
+
+.profile-info-row div {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile-info-row span,
+.profile-wallet-card span,
+.profile-footer-status {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.profile-info-row strong,
+.profile-wallet-card strong {
+    display: block;
+    margin-top: 3px;
+    color: var(--text-primary);
+    font-size: 0.94rem;
+    overflow-wrap: anywhere;
+}
+
+.profile-info-row button,
+.profile-wallet-card button,
+.profile-archive-button,
+.profile-admin-wallet-button,
+.profile-bottom-actions button {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    padding: 8px 10px;
+    cursor: pointer;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.profile-wallet-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid rgba(103, 232, 249, 0.22);
+    border-radius: 12px;
+    background: rgba(103, 232, 249, 0.06);
+    padding: 14px;
+}
+
+.profile-wallet-card button {
+    color: #001018;
+    background: var(--accent-color);
+    border-color: transparent;
+}
+
+.profile-admin-wallet-button,
+.profile-archive-button {
+    width: 100%;
+    justify-content: center;
+}
+
+.profile-bottom-actions .danger {
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.28);
+    background: rgba(239, 68, 68, 0.06);
+}
+
+.sidebar-current-user {
+    border: none;
+    padding: 0;
+}
+
+.sidebar-current-user .user-info {
+    cursor: pointer;
+}
+
+.sidebar-current-id {
+    color: var(--accent-color);
+    font-weight: 700;
+}
+
+.modal-avatar-name-row {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.modal-avatar-name-row input {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.modal-avatar-placeholder {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.segmented-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.segmented-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+    font-weight: 700;
+}
+
+.segmented-actions button.active {
+    color: #001018;
+    background: var(--accent-color);
+    border-color: transparent;
+}
+
+.group-member-list {
+    max-height: 300px;
+}
+
+.empty-selection {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+body.night-mode .chat-area.has-wallpaper::before {
+    background: rgba(0, 0, 0, 0.28);
+}
+
+body.night-mode .message.incoming {
+    background: #111111 !important;
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+body.night-mode .message.outgoing {
+    color: #001018;
+}
+
 
 .modal-content header {
     padding: 1.5rem;

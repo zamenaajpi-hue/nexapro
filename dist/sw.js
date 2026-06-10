@@ -71,8 +71,8 @@ self.addEventListener('push', event => {
   const title = data.title || 'New Message';
   const options = {
     body: data.body || 'You have a new message on Nexa.',
-    icon: '/vite.svg',
-    badge: '/vite.svg',
+    icon: '/nexa-logo.svg',
+    badge: '/nexa-logo.svg',
     data: {
       url: data.url || '/',
       kind: data.kind || 'message',

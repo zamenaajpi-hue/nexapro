@@ -55,10 +55,7 @@ const getFallbackPreview = (item: ChatItem) => {
   return 'Нет сообщений';
 };
 
-export const Sidebar: React.FC<SidebarProps> = ({
-  setShowMenuDrawer,
-  isMobileActive,
-}) => {
+export const Sidebar: React.FC<SidebarProps> = ({ setShowMenuDrawer, isMobileActive }) => {
   const {
     user,
     onlineUsers,
@@ -70,7 +67,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     allUsers,
     chatStates,
     channelPosts,
+    updateChatState: updateChatStateInStore,
   } = useChatStore();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFolder, setActiveFolder] = useState<FolderType>('all');
 
@@ -91,24 +90,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const chatUserIds = Object.keys(chats);
     return merged.filter((knownUser) =>
       knownUser.id !== user.id &&
-      (chatUserIds.includes(knownUser.id) || knownUser.id === activeChat || onlineUsers.some((onlineUser) => onlineUser.id === knownUser.id))
+      (chatUserIds.includes(knownUser.id) ||
+        knownUser.id === activeChat ||
+        onlineUsers.some((onlineUser) => onlineUser.id === knownUser.id))
     );
-  }, [onlineUsers, allUsers, chats, activeChat, user?.id, searchTerm]);
+  }, [onlineUsers, allUsers, chats, activeChat, user, searchTerm]);
 
   const updateChatState = (
     item: ChatItem,
     data: Partial<Pick<ChatStateRecord, 'pinned' | 'archived' | 'mutedUntil'>>,
   ) => {
-    socket.emit('chat:state:update', {
+    if (!user) return;
+
+    const chatType = getChatType(item);
+    const existing = chatStates[chatStateKey(chatType, item.id)];
+    updateChatStateInStore({
+      id: existing?.id || `local-${chatType}-${item.id}`,
+      userId: user.id,
       chatId: item.id,
-      chatType: getChatType(item),
-      ...data,
+      chatType,
+      unread: existing?.unread || 0,
+      pinned: data.pinned ?? existing?.pinned ?? false,
+      archived: data.archived ?? existing?.archived ?? false,
+      mutedUntil: data.mutedUntil === undefined ? existing?.mutedUntil ?? null : data.mutedUntil,
+      lastReadAt: existing?.lastReadAt ?? null,
+      updatedAt: new Date().toISOString(),
     });
+
+    if (typeof data.pinned === 'boolean') {
+      socket.emit('chat:pin', { chatId: item.id, chatType, pinned: data.pinned });
+    }
+    if (typeof data.archived === 'boolean') {
+      socket.emit('chat:archive', { chatId: item.id, chatType, archived: data.archived });
+    }
+    if (data.mutedUntil !== undefined) {
+      socket.emit('chat:mute', { chatId: item.id, chatType, mutedUntil: data.mutedUntil });
+    }
   };
 
   const items = useMemo(() => {
     if (!user) return [];
-
     const term = searchTerm.toLowerCase().trim();
 
     return ([...groups, ...channels, ...displayUsersList] as ChatItem[])
@@ -126,8 +147,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           chatType,
           state,
           name,
-          isChannel,
-          isGroup: chatType === 'group',
           lastPost,
           lastMessage,
           lastActivity,
@@ -152,9 +171,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return !!lastMessage || activeChat === item.id || !!state;
         }
 
-        if (chatType !== 'direct') {
-          return name.toLowerCase().includes(term);
-        }
+        if (chatType !== 'direct') return name.toLowerCase().includes(term);
 
         const directUser = item as User;
         return (
@@ -175,11 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside className={`sidebar ${isMobileActive ? 'mobile-active' : ''}`}>
       <div className="sidebar-header nexa-sidebar-header">
         <div className="nexa-sidebar-brand">
-          <button
-            title="Открыть меню"
-            onClick={() => setShowMenuDrawer(true)}
-            className="nexa-menu-button"
-          >
+          <button title="Открыть меню" onClick={() => setShowMenuDrawer(true)} className="nexa-menu-button">
             <Menu size={22} />
           </button>
           <NexaLogo size={42} showText={true} tagline="SECURE NETWORK" />
@@ -193,7 +206,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           type="text"
           placeholder="Поиск чатов и людей..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(event) => setSearchTerm(event.target.value)}
         />
       </div>
 
@@ -244,9 +257,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 {!item.avatarImage && ((item && 'initials' in item ? item.initials : null) || getInitials(name))}
                 {isDirect && (
-                  <span
-                    className={`presence-dot ${onlineUsers.some((onlineUser) => onlineUser.id === item.id) ? 'online' : ''}`}
-                  />
+                  <span className={`presence-dot ${onlineUsers.some((onlineUser) => onlineUser.id === item.id) ? 'online' : ''}`} />
                 )}
               </div>
 
@@ -313,8 +324,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </div>
 
-      <div className="sidebar-footer" style={{ borderTop: '1px solid var(--border-color)', padding: '10px' }}>
-        <div className="user-item" style={{ border: 'none', padding: 0 }}>
+      <div className="sidebar-footer">
+        <div className="user-item sidebar-current-user">
           <div
             className="avatar"
             style={{
@@ -326,18 +337,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <div
             className="user-info"
-            style={{ cursor: 'pointer' }}
             title="Нажмите, чтобы скопировать ID"
             onClick={() => {
-              if (user.nexaId) {
-                void navigator.clipboard.writeText(user.nexaId);
-              }
+              if (user.nexaId) void navigator.clipboard.writeText(user.nexaId);
             }}
           >
             <span className="user-name">{user.nickname}</span>
-            <span className="user-status" style={{ color: 'var(--accent-color)', fontWeight: 600 }}>
-              {user.nexaId || 'В сети'}
-            </span>
+            <span className="user-status sidebar-current-id">{user.nexaId || 'В сети'}</span>
           </div>
         </div>
       </div>

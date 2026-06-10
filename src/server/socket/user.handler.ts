@@ -3,6 +3,7 @@ import { userRepository } from '../repositories/user.repository';
 import { groupRepository } from '../repositories/group.repository';
 import { z } from 'zod';
 import { privateUserDto, publicUserDto, publicUsersDto } from '../utils/safeUser';
+import { messageRepository } from '../repositories/message.repository';
 
 const profileUpdateSchema = z.object({
   nickname: z.string().min(2).optional(),
@@ -71,6 +72,14 @@ export const handleUsers = (
       onlineUsers.set(userId, userData);
       socketToUserMap.set(socket.id, userId);
 
+      const delivered = await messageRepository.markDeliveredToUser(userId);
+      delivered.senderIds.forEach((senderId) => {
+        const senderSocket = onlineUsers.get(senderId)?.socketId;
+        if (senderSocket) {
+          io.to(senderSocket).emit('messages:delivered', { chatId: userId });
+        }
+      });
+
       io.emit('users:online', publicUsersDto(Array.from(onlineUsers.values())));
 
       const userGroups = await groupRepository.findForUser(userId);
@@ -86,6 +95,22 @@ export const handleUsers = (
       socket.emit('channels:update', enrichedChannels);
 
       const { chatStateRepository } = await import('../repositories/chat-state.repository');
+      const directMessages = await db.message.findMany({
+        where: {
+          OR: [
+            { fromId: userId, toUserId: { not: null } },
+            { toUserId: userId },
+          ],
+        },
+        select: { fromId: true, toUserId: true },
+        distinct: ['fromId', 'toUserId'],
+      });
+      const directPeerIds = Array.from(new Set(
+        directMessages
+          .map((message) => message.fromId === userId ? message.toUserId : message.fromId)
+          .filter((peerId): peerId is string => Boolean(peerId) && peerId !== userId)
+      ));
+      await Promise.all(directPeerIds.map((peerId) => chatStateRepository.touch(userId, peerId, 'direct')));
       socket.emit('chat:states', await chatStateRepository.findForUser(userId));
     } catch (err) {
       console.error(err);

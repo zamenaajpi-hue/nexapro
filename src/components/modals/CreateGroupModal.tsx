@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { X, Camera, Lock, Hash } from 'lucide-react';
+import { Camera, Hash, Lock, X } from 'lucide-react';
 import { User } from '../../types/chat';
 
 interface CreateGroupModalProps {
   onClose: () => void;
   onlineUsers: User[];
-  handleCreateGroup: (data: any) => void;
+  handleCreateGroup: (data: { name: string; description?: string; isPublic: boolean; members: string[] }) => void;
 }
 
 export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onlineUsers, handleCreateGroup }) => {
@@ -15,95 +15,102 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ onClose, onl
   const [isPublic, setIsPublic] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
 
-  const handleNext = () => {
-    if (!name.trim()) return;
-    setStep(2);
-  };
-
-  const onSubmit = () => {
+  const submit = () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
     handleCreateGroup({
-      name,
-      description,
+      name: trimmedName,
+      description: description.trim() || undefined,
       isPublic,
       members: selectedMembers,
     });
   };
 
   return (
-    <div className="modal active" onClick={onClose} style={{ zIndex: 100 }}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+    <div className="modal active" onClick={onClose}>
+      <div className="modal-content" onClick={(event) => event.stopPropagation()} style={{ maxWidth: '420px' }}>
         <header>
           <h3>{step === 1 ? 'Создание группы' : 'Добавить участников'}</h3>
-          <button className="close-modal" onClick={onClose}><X size={20} /></button>
+          <button className="close-modal" onClick={onClose} title="Закрыть">
+            <X size={20} />
+          </button>
         </header>
 
         <div className="settings-body">
-          {step === 1 && (
+          {step === 1 ? (
             <>
-              <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+              <div className="modal-avatar-name-row">
+                <div className="modal-avatar-placeholder">
                   <Camera size={24} />
                 </div>
-                <input 
-                  type="text" 
-                  placeholder="Название группы" 
+                <input
+                  type="text"
+                  placeholder="Название группы"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  style={{ flex: 1 }}
+                  onChange={(event) => setName(event.target.value)}
                 />
               </div>
 
-              <div className="setting-item" style={{ marginTop: '16px' }}>
-                <input 
-                  type="text" 
-                  placeholder="Описание (необязательно)" 
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
+              <input
+                type="text"
+                placeholder="Описание (необязательно)"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
 
-              <div className="setting-item" style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <button 
-                  onClick={() => setIsPublic(false)}
-                  style={{ flex: 1, padding: '12px', background: !isPublic ? 'var(--accent-color)' : 'var(--bg-secondary)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                >
+              <div className="segmented-actions">
+                <button type="button" className={!isPublic ? 'active' : ''} onClick={() => setIsPublic(false)}>
                   <Lock size={16} /> Приватная
                 </button>
-                <button 
-                  onClick={() => setIsPublic(true)}
-                  style={{ flex: 1, padding: '12px', background: isPublic ? 'var(--accent-color)' : 'var(--bg-secondary)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                >
+                <button type="button" className={isPublic ? 'active' : ''} onClick={() => setIsPublic(true)}>
                   <Hash size={16} /> Публичная
                 </button>
               </div>
 
-              <button className="btn-primary" onClick={handleNext} disabled={!name.trim()} style={{ marginTop: '24px' }}>Далее</button>
+              <button className="btn-primary" onClick={() => setStep(2)} disabled={!name.trim()}>
+                Далее
+              </button>
             </>
-          )}
-
-          {step === 2 && (
+          ) : (
             <>
-              <div className="selection-list" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                {onlineUsers.map(u => (
-                  <label key={u.id} className="selection-item">
-                    <input 
-                      type="checkbox" 
-                      checked={selectedMembers.includes(u.id)}
+              <div className="selection-list group-member-list">
+                {onlineUsers.length === 0 && (
+                  <div className="empty-selection">Пока нет пользователей для добавления</div>
+                )}
+                {onlineUsers.map((candidate) => (
+                  <label key={candidate.id} className="selection-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedMembers.includes(candidate.id)}
                       onChange={() => {
-                        setSelectedMembers(prev => 
-                          prev.includes(u.id) ? prev.filter(id => id !== u.id) : [...prev, u.id]
+                        setSelectedMembers((current) =>
+                          current.includes(candidate.id)
+                            ? current.filter((id) => id !== candidate.id)
+                            : [...current, candidate.id],
                         );
                       }}
                     />
-                    <div className="avatar" style={{ backgroundColor: u.avatarColor || '#ccc', width: 32, height: 32, fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', borderRadius: '50%' }}>
-                      {u.avatarImage ? <img src={u.avatarImage} alt="" style={{width: '100%', height:'100%', borderRadius:'50%'}} /> : (u.initials || u.nickname?.[0])}
+                    <div
+                      className="avatar"
+                      style={{
+                        backgroundColor: candidate.avatarColor || '#6C63FF',
+                        backgroundImage: candidate.avatarImage ? `url(${candidate.avatarImage})` : 'none',
+                        width: 32,
+                        height: 32,
+                        fontSize: '12px',
+                        borderRadius: '50%',
+                      }}
+                    >
+                      {!candidate.avatarImage && (candidate.initials || candidate.nickname?.[0])}
                     </div>
-                    <span>{u.nickname}</span>
+                    <span>{candidate.nickname}</span>
                   </label>
                 ))}
               </div>
-              <button className="btn-primary" onClick={onSubmit} style={{ marginTop: '24px' }}>Создать группу</button>
+              <div className="modal-footer-grid">
+                <button type="button" className="btn-secondary" onClick={() => setStep(1)}>Назад</button>
+                <button type="button" className="btn-primary" onClick={submit}>Создать группу</button>
+              </div>
             </>
           )}
         </div>

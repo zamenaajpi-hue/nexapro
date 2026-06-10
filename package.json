@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "clean": "node -e \"const fs=require('fs'); for (const p of ['dist','server.js']) fs.rmSync(p,{recursive:true,force:true});\"",
     "lint": "tsc --noEmit",
+    "pretest": "prisma generate",
     "test": "tsx --test tests/**/*.test.ts",
     "db:generate": "npx prisma generate",
     "db:push": "npx prisma db push",
@@ -44,6 +45,7 @@
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.5.2",
     "firebase-admin": "^13.10.0",
     "idb": "^8.0.3",
     "ioredis": "^5.10.1",
@@ -99,7 +101,7 @@
         "nsis",
         "portable"
       ],
-      "icon": "public/vite.svg"
+      "icon": "public/nexa-logo.svg"
     },
     "nsis": {
       "oneClick": false,

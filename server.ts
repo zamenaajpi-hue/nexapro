@@ -9,6 +9,7 @@ import multer from 'multer';
 import pino from 'pino';
 import pinoHttp from 'pino-http';
 import client from 'prom-client';
+import rateLimit from 'express-rate-limit';
 import { Redis } from 'ioredis';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { execSync } from 'child_process';
@@ -28,39 +29,6 @@ const normalizePhone = (phone?: string | null) => {
   if (!digits) return null;
   if (digits.length === 11 && (digits.startsWith('8') || digits.startsWith('7'))) return `7${digits.slice(1)}`;
   return digits;
-};
-
-const createRateLimiter = ({
-  windowMs,
-  max,
-  message,
-}: {
-  windowMs: number;
-  max: number;
-  message: string;
-}) => {
-  const buckets = new Map<string, { count: number; resetAt: number }>();
-  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const now = Date.now();
-    const email = typeof req.body?.email === 'string' ? req.body.email.toLowerCase().trim() : '';
-    const key = `${req.ip}:${email}`;
-    const bucket = buckets.get(key);
-
-    if (!bucket || bucket.resetAt <= now) {
-      buckets.set(key, { count: 1, resetAt: now + windowMs });
-      next();
-      return;
-    }
-
-    if (bucket.count >= max) {
-      res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
-      res.status(429).json({ error: message });
-      return;
-    }
-
-    bucket.count += 1;
-    next();
-  };
 };
 
 async function startServer() {
@@ -271,15 +239,19 @@ async function startServer() {
   });
 
   // --- Auth Routes ---
-  const authRateLimit = createRateLimiter({
+  const authRateLimit = rateLimit({
     windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-    max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 8,
-    message: 'Too many authentication attempts. Please try again later.',
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 10,
+    message: { error: 'Too many attempts' },
+    standardHeaders: true,
+    legacyHeaders: false,
   });
-  const aiRateLimit = createRateLimiter({
+  const aiRateLimit = rateLimit({
     windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS) || 60 * 1000,
     max: Number(process.env.AI_RATE_LIMIT_MAX) || 12,
-    message: 'Too many AI requests. Please try again later.',
+    message: { error: 'Too many AI requests. Please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
   });
   app.post('/api/auth/register', authRateLimit, authController.register);
   app.post('/api/auth/login', authRateLimit, authController.login);

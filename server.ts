@@ -246,13 +246,6 @@ async function startServer() {
     standardHeaders: true,
     legacyHeaders: false,
   });
-  const aiRateLimit = rateLimit({
-    windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS) || 60 * 1000,
-    max: Number(process.env.AI_RATE_LIMIT_MAX) || 12,
-    message: { error: 'Too many AI requests. Please try again later.' },
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
   app.post('/api/auth/register', authRateLimit, authController.register);
   app.post('/api/auth/login', authRateLimit, authController.login);
 
@@ -323,31 +316,6 @@ async function startServer() {
     }
   });
 
-  app.post('/api/ai/chat', authenticateUser, aiRateLimit, async (req: any, res) => {
-    try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-        return res.status(503).json({ error: 'Gemini API key is not configured' });
-      }
-
-      const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
-      if (prompt.length < 2) return res.status(400).json({ error: 'Prompt is required' });
-      if (prompt.length > 4000) return res.status(400).json({ error: 'Prompt is too long' });
-
-      const { GoogleGenAI } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey });
-      const response: any = await ai.models.generateContent({
-        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-        contents: prompt,
-      });
-
-      res.json({ text: response.text || '' });
-    } catch (err: any) {
-      console.error('[AI Error] Gemini request failed:', err);
-      res.status(500).json({ error: 'AI request failed' });
-    }
-  });
-
   // --- Push Notification Token Routes ---
   app.post('/api/push/register', authenticateUser, pushController.registerToken);
   app.post('/api/push/unregister', authenticateUser, pushController.unregisterToken);
@@ -393,7 +361,7 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = process.env.STATIC_DIST_PATH || path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

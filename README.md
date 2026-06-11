@@ -1,6 +1,6 @@
 # Nexa Messenger
 
-Nexa Messenger is a private messenger with direct chats, groups, channels, stories, calls, push notifications, and an AI assistant.
+Nexa Messenger is a private messenger with direct chats, groups, channels, stories, calls, and push notifications.
 
 It ships as a Web app, Electron desktop app, and Android app through Capacitor. The backend is an Express/Socket.IO server with Prisma for persistence.
 
@@ -13,7 +13,6 @@ It ships as a Web app, Electron desktop app, and Android app through Capacitor. 
 - Web, Electron, and Android builds
 - Prisma backend
 - Web and native push notifications
-- AI assistant through a server-side Gemini endpoint
 
 ## Requirements
 
@@ -52,7 +51,6 @@ Production notes:
 - Generate `JWT_SECRET` with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` and put it in the server `.env`.
 - Set `CORS_ORIGIN` to trusted origins only.
 - Configure `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VITE_VAPID_PUBLIC_KEY` before enabling web push.
-- Keep `GEMINI_API_KEY` server-side only.
 - Use external object storage such as S3, MinIO, or R2 for production uploads.
 
 ## Database Migrations
@@ -108,7 +106,7 @@ npm run desktop
 
 Copy `.env.example` to `.env` and replace every `CHANGE_ME` value before running in production.
 
-Secrets such as `JWT_SECRET`, `VAPID_PRIVATE_KEY`, Firebase credentials, and `GEMINI_API_KEY` must stay on the server and must not be committed.
+Secrets such as `JWT_SECRET`, `VAPID_PRIVATE_KEY`, and Firebase credentials must stay on the server and must not be committed.
 
 ## Security Notes
 
@@ -116,7 +114,6 @@ Secrets such as `JWT_SECRET`, `VAPID_PRIVATE_KEY`, Firebase credentials, and `GE
 - Uploads are MIME allowlisted and validated by file signature before creating an `UploadedFile` record.
 - Story visibility is centralized in `src/server/stories/storyPrivacy.ts` and reused by REST and Socket.IO story flows.
 - `.env`, local databases, logs, and uploaded files are ignored by git.
-- The Gemini API key is read only on the server.
 
 ## Roadmap
 

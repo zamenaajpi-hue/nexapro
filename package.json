@@ -32,7 +32,6 @@
   "dependencies": {
     "@capacitor/core": "^8.3.4",
     "@capacitor/push-notifications": "^8.1.1",
-    "@google/genai": "^1.29.0",
     "@prisma/client": "^6.1.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "@tailwindcss/vite": "^4.1.14",
@@ -64,6 +63,7 @@
     "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
     "socket.io": "^4.8.3",
+    "socket.io-adapter": "^2.5.7",
     "socket.io-client": "^4.8.3",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
@@ -101,7 +101,7 @@
         "nsis",
         "portable"
       ],
-      "icon": "public/nexa-logo.svg"
+      "icon": "build/nexa-logo.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -115,8 +115,21 @@
       "electron-main.cjs",
       "electron-preload.js",
       "electron-settings.html",
+      "build/nexa-logo.ico",
+      "node_modules/.prisma/client/**/*",
+      "prisma/dev.db",
       "public/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/@prisma/client",
+        "to": "node_modules/@prisma/client"
+      },
+      {
+        "from": "node_modules/.prisma/client",
+        "to": "node_modules/.prisma/client"
+      }
     ],
     "asar": true
   }

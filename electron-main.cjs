@@ -3,17 +3,25 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 
 let mainWindow;
 let tray;
 let isQuitting = false;
+let localServerProcess = null;
+let localServerUrl = null;
+let localServerStarted = false;
+const DESKTOP_SERVER_PORT = Number(process.env.NEXA_DESKTOP_PORT || 47832);
 
 // Config file path for persistent settings
-const configPath = path.join(app.getPath('userData'), 'nexa-config.json');
+function getConfigPath() {
+  return path.join(app.getPath('userData'), 'nexa-config.json');
+}
 
 // Get saved URL from config file or return default candidate array
 function getSavedServerUrl() {
   try {
+    const configPath = getConfigPath();
     if (fs.existsSync(configPath)) {
       const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       if (data && data.serverUrl) {
@@ -28,10 +36,187 @@ function getSavedServerUrl() {
 
 function saveServerUrl(url) {
   try {
+    const configPath = getConfigPath();
     fs.writeFileSync(configPath, JSON.stringify({ serverUrl: url }), 'utf8');
   } catch (e) {
     console.error('Error writing config:', e);
   }
+}
+
+function getPackagedDistPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar', 'dist')
+    : path.join(__dirname, 'dist');
+}
+
+function getPackagedServerPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar', 'dist', 'server.cjs')
+    : path.join(__dirname, 'dist', 'server.cjs');
+}
+
+function getBundledDbPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar', 'prisma', 'dev.db')
+    : path.join(__dirname, 'prisma', 'dev.db');
+}
+
+function ensureDesktopDatabase(targetDbPath) {
+  try {
+    const bundledDbPath = getBundledDbPath();
+    const needsSeed = !fs.existsSync(targetDbPath) || fs.statSync(targetDbPath).size < 1024;
+    if (needsSeed && fs.existsSync(bundledDbPath)) {
+      fs.mkdirSync(path.dirname(targetDbPath), { recursive: true });
+      fs.copyFileSync(bundledDbPath, targetDbPath);
+      console.log('Desktop database initialized:', targetDbPath);
+    }
+  } catch (error) {
+    console.warn('Failed to initialize desktop database:', error);
+  }
+}
+
+function ensureDesktopJwtSecret(userDataPath) {
+  if (process.env.JWT_SECRET && process.env.JWT_SECRET.trim().length >= 32) {
+    return process.env.JWT_SECRET.trim();
+  }
+
+  const secretPath = path.join(userDataPath, 'nexa-jwt-secret');
+  try {
+    if (fs.existsSync(secretPath)) {
+      const savedSecret = fs.readFileSync(secretPath, 'utf8').trim();
+      if (savedSecret.length >= 32) return savedSecret;
+    }
+
+    const nextSecret = crypto.randomBytes(48).toString('hex');
+    fs.writeFileSync(secretPath, nextSecret, { encoding: 'utf8', mode: 0o600 });
+    return nextSecret;
+  } catch (error) {
+    console.warn('Failed to persist desktop JWT secret, using in-memory fallback:', error);
+    return crypto.randomBytes(48).toString('hex');
+  }
+}
+
+let packagedPrismaResolverInstalled = false;
+
+function installPackagedPrismaResolver(logPath) {
+  if (!app.isPackaged || packagedPrismaResolverInstalled) return;
+
+  const prismaClientDir = path.join(process.resourcesPath, 'node_modules', '.prisma', 'client');
+  if (!fs.existsSync(prismaClientDir)) {
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Prisma client directory missing: ${prismaClientDir}\n`);
+    return;
+  }
+
+  const queryEnginePath = path.join(prismaClientDir, 'query_engine-windows.dll.node');
+  if (fs.existsSync(queryEnginePath)) {
+    process.env.PRISMA_QUERY_ENGINE_LIBRARY = queryEnginePath;
+  }
+
+  const Module = require('module');
+  const originalResolveFilename = Module._resolveFilename;
+  Module._resolveFilename = function resolvePackagedPrismaClient(request, parent, isMain, options) {
+    if (request === '.prisma/client' || request.startsWith('.prisma/client/')) {
+      const relativeRequest = request.replace(/^\.prisma[\\/]client[\\/]?/, '') || 'index';
+      return originalResolveFilename.call(this, path.join(prismaClientDir, relativeRequest), parent, isMain, options);
+    }
+    return originalResolveFilename.call(this, request, parent, isMain, options);
+  };
+
+  packagedPrismaResolverInstalled = true;
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] Prisma client resolver installed: ${prismaClientDir}\n`);
+}
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+    server.on('error', reject);
+  });
+}
+
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = http.createServer();
+    server.once('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function getDesktopServerPort() {
+  if (await isPortAvailable(DESKTOP_SERVER_PORT)) {
+    return DESKTOP_SERVER_PORT;
+  }
+
+  const existingUrl = `http://127.0.0.1:${DESKTOP_SERVER_PORT}`;
+  if (await testServerConnection(existingUrl)) {
+    localServerUrl = existingUrl;
+    return DESKTOP_SERVER_PORT;
+  }
+
+  return getFreePort();
+}
+
+async function startLocalServer() {
+  if (localServerUrl) return localServerUrl;
+
+  const serverPath = getPackagedServerPath();
+  if (!fs.existsSync(serverPath)) {
+    console.warn('Packaged server file was not found:', serverPath);
+    return null;
+  }
+
+  const userDataPath = app.getPath('userData');
+  const port = await getDesktopServerPort();
+  if (localServerUrl) return localServerUrl;
+  const desktopDbPath = path.join(userDataPath, 'nexa-desktop.db');
+  const logPath = path.join(userDataPath, 'desktop-server.log');
+  ensureDesktopDatabase(desktopDbPath);
+  const jwtSecret = ensureDesktopJwtSecret(userDataPath);
+  if (localServerStarted) return localServerUrl;
+
+  const env = {
+    ...process.env,
+    NODE_ENV: 'production',
+    PORT: String(port),
+    STATIC_DIST_PATH: getPackagedDistPath(),
+    DATABASE_URL: process.env.DATABASE_URL || `file:${desktopDbPath.replace(/\\/g, '/')}`,
+    JWT_SECRET: jwtSecret,
+  };
+  Object.assign(process.env, env);
+  delete process.env.ELECTRON_RUN_AS_NODE;
+  installPackagedPrismaResolver(logPath);
+
+  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  logStream.write(`\n[${new Date().toISOString()}] Starting local server ${serverPath} on ${port} in Electron main\n`);
+  logStream.end();
+
+  try {
+    require(serverPath);
+    localServerStarted = true;
+  } catch (error) {
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] Require error: ${error.stack || error}\n`);
+    console.error('Failed to start local Nexa server:', error);
+    return null;
+  }
+
+  const candidateUrl = `http://127.0.0.1:${port}`;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (await testServerConnection(candidateUrl)) {
+      localServerUrl = candidateUrl;
+      saveServerUrl(candidateUrl);
+      return localServerUrl;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  console.error('Local Nexa server did not become healthy in time.');
+  return null;
 }
 
 // Function to check if a URL is active and healthy
@@ -89,7 +274,7 @@ const EMBEDDED_ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAA
 // Safe icon generator which handles any file missing or unsupported gracefully (e.g. SVG on Windows)
 function getAppIcon() {
   try {
-    const iconPath = path.join(__dirname, 'public', 'vite.svg');
+    const iconPath = path.join(__dirname, 'public', 'nexa-logo.svg');
     const img = nativeImage.createFromPath(iconPath);
     if (img && !img.isEmpty()) {
       return img;
@@ -102,25 +287,31 @@ function getAppIcon() {
 
 // Perform active discovery to check which URL is live
 async function findActiveServerUrl() {
-  // 1. Saved Custom Server URL
+  // 1. Packaged local server for the desktop app.
+  const packagedUrl = await startLocalServer();
+  if (packagedUrl) {
+    return packagedUrl;
+  }
+
+  // 2. Saved Custom Server URL
   const savedUrl = getSavedServerUrl();
   if (savedUrl && await testServerConnection(savedUrl)) {
     return savedUrl;
   }
 
-  // 2. Localhost Server (port 3000 is our template's default)
+  // 3. Localhost Server (port 3000 is our template's default)
   const localUrl = 'http://localhost:3000';
   if (await testServerConnection(localUrl)) {
     return localUrl;
   }
 
-  // 3. active development URL on AI Studio container
+  // 4. active development URL on AI Studio container
   const devUrl = 'https://ais-dev-7bgky7op2qkpdmgoz7hysn-816012459690.europe-west2.run.app';
   if (await testServerConnection(devUrl)) {
     return devUrl;
   }
 
-  // 4. production URL
+  // 5. production URL
   const preUrl = 'https://ais-pre-7bgky7op2qkpdmgoz7hysn-816012459690.europe-west2.run.app';
   if (await testServerConnection(preUrl)) {
     return preUrl;
@@ -377,6 +568,11 @@ if (!gotTheLock) {
     createMainWindow();
     createTray();
     setAppMenu();
+    session.defaultSession.clearStorageData({
+      storages: ['serviceworkers', 'cachestorage'],
+    }).catch((error) => {
+      console.warn('Failed to clear Electron web cache:', error);
+    });
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -385,6 +581,10 @@ if (!gotTheLock) {
     });
   });
 }
+
+app.on('before-quit', () => {
+  isQuitting = true;
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

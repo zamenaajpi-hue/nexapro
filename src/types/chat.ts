@@ -104,3 +104,10 @@ export interface ChatStateRecord {
   lastReadAt?: string | Date | null;
   updatedAt: string | Date;
 }
+
+export interface GroupCallParticipant {
+  userId: string;
+  user: User;
+  muted: boolean;
+  joinedAt: string;
+}

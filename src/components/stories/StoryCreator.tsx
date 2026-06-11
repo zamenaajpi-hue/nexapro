@@ -99,11 +99,11 @@ export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void
             <input type="file" accept="image/*,video/*" hidden ref={fileInputRef} onChange={handleFileChange} />
           </div>
         ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="story-creator-preview-layout">
             {currentType === 'video' ? (
-              <video src={preview} controls autoPlay loop style={{ maxHeight: '70vh', maxWidth: '100%', objectFit: 'contain' }} />
+              <video src={preview} controls autoPlay loop className="story-creator-preview-media" />
             ) : (
-              <img src={preview} alt="Preview" style={{ maxHeight: '70vh', maxWidth: '100%', objectFit: 'contain' }} />
+              <img src={preview} alt="Preview" className="story-creator-preview-media" />
             )}
 
             <div style={{ width: '100%', maxWidth: '400px', padding: '1rem', marginTop: '1rem', display: 'flex', gap: '0.5rem', flexDirection: 'column' }}>

@@ -21,6 +21,14 @@ interface MessageBubbleProps {
   onForward?: (msg: Message) => void;
 }
 
+const formatMediaTime = (seconds: number) => {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
+  const rounded = Math.floor(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded % 60;
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+};
+
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
   msg,
   isOutgoing,
@@ -39,7 +47,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onForward,
 }) => {
   const videoNoteRef = React.useRef<HTMLVideoElement | null>(null);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [isVideoNotePlaying, setIsVideoNotePlaying] = React.useState(false);
+  const [videoNoteDuration, setVideoNoteDuration] = React.useState(0);
+  const [videoNoteCurrentTime, setVideoNoteCurrentTime] = React.useState(0);
+  const [isAudioPlaying, setIsAudioPlaying] = React.useState(false);
+  const [audioDuration, setAudioDuration] = React.useState(0);
+  const [audioCurrentTime, setAudioCurrentTime] = React.useState(0);
 
   const resolveMediaSrc = (src?: string | null) => {
     if (!src || src === 'shared') return '';
@@ -48,18 +62,79 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const mediaSrc = resolveMediaSrc(msg.data);
   const isVideoNote = msg.type === 'video' && (msg.text === '[VIDEO_NOTE]' || msg.mediaKind === 'video-note');
+  const isAudioMessage = msg.type === 'audio';
+  const videoNoteProgress = videoNoteDuration > 0 ? Math.min(videoNoteCurrentTime / videoNoteDuration, 1) : 0;
+  const videoNoteTimeLabel = formatMediaTime(isVideoNotePlaying ? videoNoteCurrentTime : videoNoteDuration);
+  const audioProgress = audioDuration > 0 ? Math.min(audioCurrentTime / audioDuration, 1) : 0;
+  const audioTimeLabel = formatMediaTime(isAudioPlaying ? audioCurrentTime : audioDuration);
+  const waveformBars = React.useMemo(() => {
+    const seed = Array.from(msg.id).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    return Array.from({ length: 44 }, (_, index) => 8 + ((seed + index * 13) % 22));
+  }, [msg.id]);
 
   const toggleVideoNote = async () => {
     const video = videoNoteRef.current;
     if (!video) return;
 
     if (video.paused) {
+      if (video.ended) video.currentTime = 0;
       await video.play().catch(() => {});
       setIsVideoNotePlaying(!video.paused);
     } else {
       video.pause();
       setIsVideoNotePlaying(false);
     }
+  };
+
+  const syncVideoNoteTime = () => {
+    const video = videoNoteRef.current;
+    if (!video) return;
+    setVideoNoteCurrentTime(video.currentTime);
+    if (Number.isFinite(video.duration)) setVideoNoteDuration(video.duration);
+  };
+
+  const handleVideoNoteEnded = () => {
+    const video = videoNoteRef.current;
+    if (video) video.currentTime = 0;
+    setIsVideoNotePlaying(false);
+    setVideoNoteCurrentTime(0);
+  };
+
+  const syncAudioTime = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setAudioCurrentTime(audio.currentTime);
+    if (Number.isFinite(audio.duration)) setAudioDuration(audio.duration);
+  };
+
+  const toggleAudio = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (audio.paused) {
+      if (audio.ended) audio.currentTime = 0;
+      await audio.play().catch(() => {});
+      setIsAudioPlaying(!audio.paused);
+    } else {
+      audio.pause();
+      setIsAudioPlaying(false);
+    }
+  };
+
+  const seekAudio = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+    audio.currentTime = ratio * audio.duration;
+    setAudioCurrentTime(audio.currentTime);
+  };
+
+  const handleAudioEnded = () => {
+    const audio = audioRef.current;
+    if (audio) audio.currentTime = 0;
+    setIsAudioPlaying(false);
+    setAudioCurrentTime(0);
   };
 
   const groupedReactions = React.useMemo(() => {
@@ -78,7 +153,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }, [msg.reactions, currentUser?.id]);
 
   return (
-    <div className={`message ${isOutgoing ? 'outgoing' : 'incoming'} ${msg.type === 'sticker' ? 'sticker-msg' : ''} ${isVideoNote ? 'video-note-message' : ''}`}>
+    <div className={`message ${isOutgoing ? 'outgoing' : 'incoming'} ${msg.type === 'sticker' ? 'sticker-msg' : ''} ${isVideoNote ? 'video-note-message' : ''} ${isAudioMessage ? 'audio-message' : ''}`}>
       {/* Quick Actions Bar (Visible on Hover) */}
       <div className="message-actions-trigger">
         <div className="actions-reactions">
@@ -167,7 +242,46 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       ) : msg.type === 'audio' ? (
         <div className="audio-player">
           {mediaSrc ? (
-            <audio controls preload="metadata" src={mediaSrc} />
+            <div className="voice-message">
+              <audio
+                ref={audioRef}
+                preload="metadata"
+                src={mediaSrc}
+                onLoadedMetadata={syncAudioTime}
+                onTimeUpdate={syncAudioTime}
+                onPlay={() => setIsAudioPlaying(true)}
+                onPause={() => setIsAudioPlaying(false)}
+                onEnded={handleAudioEnded}
+              />
+              <button
+                type="button"
+                className="voice-play-button"
+                onClick={toggleAudio}
+                aria-label={isAudioPlaying ? 'Pause voice message' : 'Play voice message'}
+              >
+                {isAudioPlaying ? <Pause size={20} /> : <Play size={22} fill="currentColor" />}
+              </button>
+              <div className="voice-body">
+                <button
+                  type="button"
+                  className="voice-waveform"
+                  onClick={seekAudio}
+                  aria-label="Seek voice message"
+                >
+                  {waveformBars.map((height, index) => (
+                    <span
+                      key={`${msg.id}-bar-${index}`}
+                      className={index / waveformBars.length <= audioProgress ? 'played' : ''}
+                      style={{ height: `${height}px` }}
+                    />
+                  ))}
+                </button>
+                <div className="voice-meta">
+                  <span>{audioTimeLabel}</span>
+                  <span>voice</span>
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="media-unsupported">Audio file is unavailable</div>
           )}
@@ -181,6 +295,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             className="video-note"
             onClick={toggleVideoNote}
             aria-label={isVideoNotePlaying ? 'Pause video message' : 'Play video message'}
+            style={{ '--video-note-progress': `${videoNoteProgress * 360}deg` } as React.CSSProperties}
           >
             <video
               ref={videoNoteRef}
@@ -190,12 +305,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               preload="metadata"
               onPlay={() => setIsVideoNotePlaying(true)}
               onPause={() => setIsVideoNotePlaying(false)}
-              onEnded={() => setIsVideoNotePlaying(false)}
+              onLoadedMetadata={syncVideoNoteTime}
+              onTimeUpdate={syncVideoNoteTime}
+              onEnded={handleVideoNoteEnded}
             />
+            <span className="video-note-progress" />
             <span className={`video-note-control ${isVideoNotePlaying ? 'playing' : ''}`}>
               {isVideoNotePlaying ? <Pause size={22} /> : <Play size={24} fill="currentColor" />}
             </span>
-            <span className="video-note-ring" />
+            <span className="video-note-time">{videoNoteTimeLabel}</span>
           </button>
         ) : (
           <video controls preload="metadata" src={mediaSrc} className="media-content" />

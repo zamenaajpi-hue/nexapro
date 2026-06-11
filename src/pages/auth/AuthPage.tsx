@@ -34,7 +34,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, loading, error }) =>
     <div className="screen active" id="login-screen">
       <div className="login-card">
         <div className="logo-container">
-          <NexaLogo size={80} showText={true} tagline="ИНТЕЛЛЕКТУАЛЬНАЯ ПЛАТФОРМА СВЯЗИ" />
+          <NexaLogo size={80} showText={true} tagline="Интеллектуальная платформа связи" />
         </div>
 
         <p className="subtitle">
@@ -82,7 +82,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, loading, error }) =>
           />
 
           <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Выполняем...' : authMode === 'login' ? 'Войти' : 'Создать аккаунт'}
+            {loading ? 'Проверяем...' : authMode === 'login' ? 'Войти' : 'Создать аккаунт'}
           </button>
         </form>
 

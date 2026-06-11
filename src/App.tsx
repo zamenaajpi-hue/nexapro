@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useCallback, useState, useEffect, useRef } from "react";
 import { socket, connectSocket } from "./socket/client";
 import { useChatStore } from "./store/useChatStore";
-import { User, Message, Group, Channel } from "./types/chat";
+import { User, Message, Group, Channel, GroupCallParticipant } from "./types/chat";
 import * as e2ee from "./utils/e2ee";
 import { callSounds } from "./utils/callSounds";
 import {
@@ -73,6 +73,11 @@ const normalizePhoneForClient = (phone?: string | null) => {
   if (!digits) return "";
   if (digits.length === 11 && (digits.startsWith("8") || digits.startsWith("7"))) return `7${digits.slice(1)}`;
   return digits;
+};
+
+const isMobileContactsDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPad/i.test(navigator.userAgent) || Boolean((navigator as any).contacts?.select);
 };
 
 const inviteText = "Привет! Я пользуюсь NEXA Messenger. Присоединяйся: ";
@@ -252,7 +257,6 @@ const App: React.FC = () => {
   }, []);
 
   const [messageText, setMessageText] = useState("");
-  const [isAiLoading, setIsAiLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [pickerType, setPickerType] = useState<"emoji" | "sticker" | "voice">(
@@ -278,6 +282,7 @@ const App: React.FC = () => {
   const [showMenuDrawer, setShowMenuDrawer] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [showContactsModal, setShowContactsModal] = useState(false);
+  const [showContactsEntry, setShowContactsEntry] = useState(isMobileContactsDevice);
   const [phoneContacts, setPhoneContacts] = useState<ImportedPhoneContact[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("nexa_phone_contacts") || "[]");
@@ -299,6 +304,16 @@ const App: React.FC = () => {
   const [nightMode, setNightMode] = useState(
     () => localStorage.getItem("nexa_night_mode") === "true",
   );
+
+  useEffect(() => {
+    setShowContactsEntry(isMobileContactsDevice());
+  }, []);
+
+  useEffect(() => {
+    if (!showContactsEntry && showContactsModal) {
+      setShowContactsModal(false);
+    }
+  }, [showContactsEntry, showContactsModal]);
 
   // Wallet and coins state
   const [walletBalance, setWalletBalance] = useState<number>(0);
@@ -368,6 +383,20 @@ const App: React.FC = () => {
     isVideoOff?: boolean;
     duration?: number;
   }>({ status: "idle" });
+  const [groupCall, setGroupCall] = useState<{
+    groupId: string | null;
+    status: "idle" | "joining" | "connected";
+    participants: GroupCallParticipant[];
+    isMuted: boolean;
+    duration: number;
+  }>({
+    groupId: null,
+    status: "idle",
+    participants: [],
+    isMuted: false,
+    duration: 0,
+  });
+  const [activeGroupCalls, setActiveGroupCalls] = useState<Record<string, GroupCallParticipant[]>>({});
 
   // Audio initialization flag
   const [audioInitialized, setAudioInitialized] = useState(false);
@@ -403,6 +432,8 @@ const App: React.FC = () => {
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const videoRecordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
+  const videoRecordingPreviewRef = useRef<HTMLVideoElement | null>(null);
+  const videoNoteCancelledRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const groupAvatarInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -440,6 +471,9 @@ const App: React.FC = () => {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
+  const groupCallStreamRef = useRef<MediaStream | null>(null);
+  const groupPeerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const groupRemoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -453,6 +487,10 @@ const App: React.FC = () => {
   useEffect(() => {
     callStateRef.current = callState;
   }, [callState]);
+  const groupCallRef = useRef(groupCall);
+  useEffect(() => {
+    groupCallRef.current = groupCall;
+  }, [groupCall]);
 
   useEffect(() => {
     allUsersRef.current = allUsers;
@@ -561,6 +599,113 @@ const App: React.FC = () => {
     return pc;
   };
 
+  const removeGroupPeerConnection = (peerId: string) => {
+    const pc = groupPeerConnectionsRef.current.get(peerId);
+    if (pc) {
+      pc.close();
+      groupPeerConnectionsRef.current.delete(peerId);
+    }
+
+    const audio = groupRemoteAudioRefs.current.get(peerId);
+    if (audio) {
+      audio.srcObject = null;
+      audio.remove();
+      groupRemoteAudioRefs.current.delete(peerId);
+    }
+  };
+
+  const cleanupGroupCall = (emitLeave = true) => {
+    const groupId = groupCallRef.current.groupId;
+    if (emitLeave && groupId && socket.connected) {
+      socket.emit("group-call:leave", { groupId });
+    }
+
+    groupPeerConnectionsRef.current.forEach((pc) => pc.close());
+    groupPeerConnectionsRef.current.clear();
+    groupRemoteAudioRefs.current.forEach((audio) => {
+      audio.srcObject = null;
+      audio.remove();
+    });
+    groupRemoteAudioRefs.current.clear();
+
+    if (groupCallStreamRef.current) {
+      groupCallStreamRef.current.getTracks().forEach((track) => track.stop());
+      groupCallStreamRef.current = null;
+    }
+
+    setGroupCall({
+      groupId: null,
+      status: "idle",
+      participants: [],
+      isMuted: false,
+      duration: 0,
+    });
+  };
+
+  const setupGroupPeerConnection = (peerId: string, stream: MediaStream) => {
+    const existing = groupPeerConnectionsRef.current.get(peerId);
+    if (existing) return existing;
+
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun2.l.google.com:19302" },
+      ],
+    });
+
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+    pc.onicecandidate = (event) => {
+      const groupId = groupCallRef.current.groupId;
+      if (event.candidate && groupId && socket.connected) {
+        socket.emit("group-call:signal", {
+          groupId,
+          to: peerId,
+          signal: { candidate: event.candidate },
+        });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      if (!event.streams?.[0]) return;
+
+      let audio = groupRemoteAudioRefs.current.get(peerId);
+      if (!audio) {
+        audio = new Audio();
+        audio.autoplay = true;
+        audio.volume = 1;
+        audio.style.display = "none";
+        audio.dataset.groupCallPeer = peerId;
+        document.body.appendChild(audio);
+        groupRemoteAudioRefs.current.set(peerId, audio);
+      }
+
+      audio.srcObject = event.streams[0];
+      audio.play().catch((error) => {
+        console.warn("[GroupCall] Remote audio playback was delayed:", error);
+      });
+    };
+
+    groupPeerConnectionsRef.current.set(peerId, pc);
+    return pc;
+  };
+
+  const createGroupOfferForPeer = async (peerId: string) => {
+    const groupId = groupCallRef.current.groupId;
+    const stream = groupCallStreamRef.current;
+    if (!groupId || !stream || peerId === user?.id) return;
+
+    try {
+      const pc = setupGroupPeerConnection(peerId, stream);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("group-call:signal", { groupId, to: peerId, signal: { sdp: offer } });
+    } catch (error) {
+      console.error("[GroupCall] Failed to create offer:", error);
+    }
+  };
+
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
@@ -604,6 +749,11 @@ const App: React.FC = () => {
     return () => {
       if (videoRecordingTimerRef.current) clearInterval(videoRecordingTimerRef.current);
     };
+  }, [isVideoRecording]);
+
+  useEffect(() => {
+    if (!isVideoRecording || !videoRecordingPreviewRef.current || !videoStreamRef.current) return;
+    videoRecordingPreviewRef.current.srcObject = videoStreamRef.current;
   }, [isVideoRecording]);
 
   const uploadFile = async (
@@ -759,6 +909,7 @@ const App: React.FC = () => {
       );
       videoRecorderRef.current = mediaRecorder;
       videoStreamRef.current = stream;
+      videoNoteCancelledRef.current = false;
       const chunks: Blob[] = [];
 
       mediaRecorder.ondataavailable = (e) => {
@@ -768,15 +919,17 @@ const App: React.FC = () => {
       mediaRecorder.onstop = () => {
         const videoMime = mediaRecorder.mimeType || mimeType || "video/webm";
         const videoBlob = new Blob(chunks, { type: videoMime });
-        if (activeChatRef.current) {
+        if (!videoNoteCancelledRef.current && activeChatRef.current && videoBlob.size > 0) {
           uploadFile(videoBlob, `video-note.${extensionForMime(videoMime, "webm")}`, activeChatRef.current, {
             textOverride: "[VIDEO_NOTE]",
           });
         }
         stream.getTracks().forEach((track) => track.stop());
+        videoStreamRef.current = null;
+        videoRecorderRef.current = null;
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(1000);
       setIsVideoRecording(true);
       setVideoRecordingDuration(0);
     } catch (err) {
@@ -799,6 +952,19 @@ const App: React.FC = () => {
       if (videoRecordingTimerRef.current) clearInterval(videoRecordingTimerRef.current);
       setVideoRecordingDuration(0);
     }
+  };
+
+  const cancelVideoNoteRecording = () => {
+    videoNoteCancelledRef.current = true;
+    if (videoRecorderRef.current && isVideoRecording) {
+      videoRecorderRef.current.stop();
+    } else {
+      videoStreamRef.current?.getTracks().forEach((track) => track.stop());
+      videoStreamRef.current = null;
+    }
+    setIsVideoRecording(false);
+    if (videoRecordingTimerRef.current) clearInterval(videoRecordingTimerRef.current);
+    setVideoRecordingDuration(0);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1009,6 +1175,62 @@ const App: React.FC = () => {
     setCallState({ status: "idle" });
   };
 
+  const handleJoinGroupCall = async (groupId: string) => {
+    if (!groupId || !user) return;
+    if (callStateRef.current.status !== "idle") {
+      notify("Завершите личный звонок перед входом в групповой голосовой чат", "warning");
+      return;
+    }
+
+    if (groupCallRef.current.status !== "idle" && groupCallRef.current.groupId !== groupId) {
+      cleanupGroupCall(true);
+    }
+
+    try {
+      setGroupCall((prev) => ({
+        ...prev,
+        groupId,
+        status: "joining",
+        isMuted: false,
+        duration: 0,
+      }));
+
+      if ((window as any).electron?.requestMediaPermission) {
+        try {
+          await (window as any).electron.requestMediaPermission({ audio: true, video: false });
+        } catch (error) {
+          console.log("[GroupCall] Electron media permission fallback:", error);
+        }
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      groupCallStreamRef.current = stream;
+      socket.emit("group-call:join", { groupId });
+      callSounds.playCallStartSound();
+    } catch (error) {
+      console.error("[GroupCall] Failed to join:", error);
+      cleanupGroupCall(false);
+      notify("Нужен доступ к микрофону для группового звонка", "warning");
+    }
+  };
+
+  const handleLeaveGroupCall = () => {
+    callSounds.playCallEndSound();
+    cleanupGroupCall(true);
+  };
+
+  const handleToggleGroupMute = () => {
+    const groupId = groupCallRef.current.groupId;
+    if (!groupId || !groupCallStreamRef.current) return;
+
+    const nextMuted = !groupCallRef.current.isMuted;
+    groupCallStreamRef.current.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
+    setGroupCall((prev) => ({ ...prev, isMuted: nextMuted }));
+    socket.emit("group-call:mute", { groupId, muted: nextMuted });
+  };
+
   const formatDuration = (sec?: number) => {
     if (!sec) return "00:00";
     const m = Math.floor(sec / 60)
@@ -1049,6 +1271,18 @@ const App: React.FC = () => {
     }
     return () => clearInterval(interval);
   }, [callState.status]);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    if (groupCall.status === "connected") {
+      interval = setInterval(() => {
+        setGroupCall((prev) => ({ ...prev, duration: prev.duration + 1 }));
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [groupCall.status]);
 
   useEffect(() => {
     const savedToken = localStorage.getItem("nexa_token");
@@ -1114,7 +1348,13 @@ const App: React.FC = () => {
       }
     };
 
-    const handleDisconnect = () => setIsConnected(false);
+    const handleDisconnect = () => {
+      setIsConnected(false);
+      if (groupCallRef.current.status !== "idle") {
+        cleanupGroupCall(false);
+      }
+      setActiveGroupCalls({});
+    };
 
     if (!user) return;
 
@@ -1262,6 +1502,10 @@ const App: React.FC = () => {
       }
     });
 
+    socket.on("profile:update:error", ({ error }) => {
+      notify(error || "Не удалось сохранить профиль");
+    });
+
     socket.on("call:incoming", ({ from, type }) => {
       const caller =
         allUsersRef.current.find((u) => u.id === from.id) ||
@@ -1387,6 +1631,87 @@ const App: React.FC = () => {
       }
     });
 
+    socket.on("group-call:joined", ({ groupId, participants, existingParticipantIds }) => {
+      setActiveGroupCalls((prev) => ({ ...prev, [groupId]: participants || [] }));
+      setGroupCall((prev) => ({
+        ...prev,
+        groupId,
+        status: "connected",
+        participants: participants || [],
+        duration: prev.groupId === groupId ? prev.duration : 0,
+      }));
+
+      (existingParticipantIds || []).forEach((peerId: string) => {
+        void createGroupOfferForPeer(peerId);
+      });
+    });
+
+    socket.on("group-call:state", ({ groupId, participants }) => {
+      setActiveGroupCalls((prev) => {
+        const next = { ...prev };
+        if (participants?.length) {
+          next[groupId] = participants;
+        } else {
+          delete next[groupId];
+        }
+        return next;
+      });
+      setGroupCall((prev) => {
+        if (prev.groupId !== groupId && prev.status === "idle") return prev;
+        return {
+          ...prev,
+          groupId,
+          participants: participants || [],
+          status: prev.groupId === groupId ? prev.status : prev.status,
+        };
+      });
+    });
+
+    socket.on("group-call:ended", ({ groupId }) => {
+      setActiveGroupCalls((prev) => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
+      if (groupCallRef.current.groupId === groupId) {
+        cleanupGroupCall(false);
+      }
+    });
+
+    socket.on("group-call:peer-left", ({ groupId, userId: peerId }) => {
+      if (groupCallRef.current.groupId !== groupId) return;
+      removeGroupPeerConnection(peerId);
+      setGroupCall((prev) => ({
+        ...prev,
+        participants: prev.participants.filter((participant) => participant.userId !== peerId),
+      }));
+    });
+
+    socket.on("group-call:signal", async ({ groupId, fromId, signal }) => {
+      if (groupCallRef.current.groupId !== groupId || !groupCallStreamRef.current) return;
+
+      try {
+        const pc = setupGroupPeerConnection(fromId, groupCallStreamRef.current);
+        if (signal.sdp) {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          if (signal.sdp.type === "offer") {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit("group-call:signal", { groupId, to: fromId, signal: { sdp: answer } });
+          }
+        } else if (signal.candidate) {
+          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        }
+      } catch (error) {
+        console.error("[GroupCall] Failed to handle signal:", error);
+      }
+    });
+
+    socket.on("group-call:error", ({ error }) => {
+      cleanupGroupCall(false);
+      notify(error || "Не удалось подключиться к групповому звонку");
+    });
+
     socket.on("typing:update", ({ chatId, userId, userName, isTyping }) => {
       setTypingUsers((prev) => {
         const chatTyping = { ...(prev[chatId] || {}) };
@@ -1431,11 +1756,18 @@ const App: React.FC = () => {
       socket.off("message:history:result");
       socket.off("message:edit:error");
       socket.off("profile:updated");
+      socket.off("profile:update:error");
       socket.off("call:incoming");
       socket.off("call:accepted");
       socket.off("call:rejected");
       socket.off("call:ended");
       socket.off("call:signal");
+      socket.off("group-call:joined");
+      socket.off("group-call:state");
+      socket.off("group-call:ended");
+      socket.off("group-call:peer-left");
+      socket.off("group-call:signal");
+      socket.off("group-call:error");
       socket.off("typing:update");
       socket.off("auth:expired");
     };
@@ -1678,27 +2010,6 @@ const App: React.FC = () => {
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!messageText.trim() || !activeChat) return;
-
-    if (messageText.trim().startsWith("/ai ")) {
-      const prompt = messageText.trim().slice(4).trim();
-      if (!prompt) return;
-      setIsAiLoading(true);
-      try {
-        const res = await fetch("/api/ai/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "AI request failed");
-        setMessageText(data.text || "");
-      } catch (err: any) {
-        notify(err.message || "AI request failed");
-      } finally {
-        setIsAiLoading(false);
-      }
-      return;
-    }
 
     const isChannel = [...groups, ...(useChatStore.getState().channels || [])].some(
       c => c.id === activeChat && (('isChannel' in c && c.isChannel) || (('isGroup' in c && c.name.includes('📢'))))
@@ -2353,6 +2664,12 @@ const App: React.FC = () => {
     (i) => i.id === activeChat,
   );
   const isChannelChat = activeChatItem && 'isChannel' in activeChatItem && activeChatItem.isChannel;
+  const isGroupChat = !!activeChatItem && "isGroup" in activeChatItem && activeChatItem.isGroup;
+  const isDirectChat = !!activeChatItem && !("members" in activeChatItem);
+  const isActiveChatOnline = isDirectChat && onlineUsers.some((onlineUser) => onlineUser.id === activeChatItem?.id);
+  const isCurrentGroupCall = !!activeChat && groupCall.groupId === activeChat && groupCall.status !== "idle";
+  const currentGroupCallParticipants = activeChat ? (activeGroupCalls[activeChat] || (isCurrentGroupCall ? groupCall.participants : [])) : [];
+  const isGroupCallAvailable = currentGroupCallParticipants.length > 0;
   const activeMessages = activeChat 
     ? (isChannelChat 
         ? (useChatStore.getState().channelPosts[activeChat] || []).map((p: ChannelPost) => {
@@ -2435,6 +2752,7 @@ const App: React.FC = () => {
       setShowMenuDrawer={setShowMenuDrawer}
       setShowCallsModal={setShowCallsModal}
       setShowContactsModal={setShowContactsModal}
+      showContactsEntry={showContactsEntry}
     >
       <LaunchSplash />
       <div className="toast-stack" aria-live="polite" aria-atomic="true">
@@ -2669,7 +2987,9 @@ const App: React.FC = () => {
                           : "участников"}
                       </div>
                     ) : (
-                      <div className="online-indicator">В сети</div>
+                      <div className={`online-indicator ${isActiveChatOnline ? "" : "offline"}`}>
+                        {isActiveChatOnline ? "В сети" : "Не в сети"}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -2726,15 +3046,138 @@ const App: React.FC = () => {
                     </button>
                   </>
                 )}
+                {activeChat && isGroupChat && (
+                  <button
+                    title={isCurrentGroupCall ? "Выйти из группового звонка" : "Войти в групповой звонок"}
+                    onClick={() => {
+                      if (isCurrentGroupCall) {
+                        handleLeaveGroupCall();
+                      } else {
+                        void handleJoinGroupCall(activeChat);
+                      }
+                    }}
+                    style={{
+                      background: isCurrentGroupCall ? "rgba(239, 68, 68, 0.16)" : "rgba(0, 239, 255, 0.1)",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "12px",
+                      color: isCurrentGroupCall ? "#ff6b6b" : "var(--accent-color)",
+                      cursor: "pointer",
+                      padding: "8px",
+                      display: "flex",
+                      alignItems: "center",
+                      transition: "transform 0.2s",
+                    }}
+                    onMouseOver={(e) =>
+                      (e.currentTarget.style.transform = "scale(1.08)")
+                    }
+                    onMouseOut={(e) =>
+                      (e.currentTarget.style.transform = "scale(1)")
+                    }
+                  >
+                    {isCurrentGroupCall ? <PhoneOff size={20} /> : <PhoneCall size={20} />}
+                  </button>
+                )}
               </div>
             </header>
 
+            {activeChat && isGroupChat && (isGroupCallAvailable || isCurrentGroupCall) && (
+              <section className={`group-call-stage ${isCurrentGroupCall ? "joined" : ""}`}>
+                <div className="group-call-stage-header">
+                  <div className="group-call-stage-title">
+                    <div
+                      className="group-call-stage-avatar"
+                      style={{
+                        backgroundColor: activeChatItem?.avatarColor,
+                        backgroundImage: activeChatItem?.avatarImage ? `url(${activeChatItem.avatarImage})` : "none",
+                      }}
+                    >
+                      {!activeChatItem?.avatarImage &&
+                        ((activeChatItem && "initials" in activeChatItem ? activeChatItem.initials : null) ||
+                          getInitials(activeChatItem && "name" in activeChatItem ? activeChatItem.name : "G"))}
+                    </div>
+                    <div>
+                      <span className="group-call-eyebrow">Групповой звонок</span>
+                      <h3>{activeChatItem && "name" in activeChatItem ? activeChatItem.name : "Группа"}</h3>
+                      <p>
+                        {isCurrentGroupCall
+                          ? `${currentGroupCallParticipants.length} участников • ${formatDuration(groupCall.duration)}`
+                          : `${currentGroupCallParticipants.length} участников уже говорят`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="group-call-stage-tools">
+                    <button type="button" title="Участники">
+                      <Users size={18} />
+                    </button>
+                    <button type="button" title="Голосовой канал">
+                      <PhoneCall size={18} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className={`group-call-grid count-${Math.min(currentGroupCallParticipants.length, 6)}`}>
+                  {currentGroupCallParticipants.map((participant) => {
+                    const isSelf = participant.userId === user?.id;
+                    const participantName = isSelf ? "Вы" : participant.user.nickname;
+                    return (
+                      <div
+                        className={`group-call-tile ${participant.muted ? "muted" : "speaking"}`}
+                        key={participant.userId}
+                        style={{ backgroundColor: participant.user.avatarColor || "#1f1f24" }}
+                      >
+                        <div
+                          className="group-call-tile-avatar"
+                          style={{
+                            backgroundColor: participant.user.avatarColor,
+                            backgroundImage: participant.user.avatarImage ? `url(${participant.user.avatarImage})` : "none",
+                          }}
+                        >
+                          {!participant.user.avatarImage &&
+                            (participant.user.initials || getInitials(participant.user.nickname))}
+                        </div>
+                        <div className="group-call-nameplate">
+                          {participant.muted ? <MicOff size={15} /> : <Mic size={15} />}
+                          <span>{participantName}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="group-call-dock">
+                  {isCurrentGroupCall && (
+                    <button
+                      type="button"
+                      className={`group-call-round-btn ${groupCall.isMuted ? "active" : ""}`}
+                      onClick={handleToggleGroupMute}
+                      title={groupCall.isMuted ? "Включить микрофон" : "Выключить микрофон"}
+                    >
+                      {groupCall.isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`group-call-round-btn primary ${isCurrentGroupCall ? "danger" : ""}`}
+                    onClick={() => {
+                      if (isCurrentGroupCall) {
+                        handleLeaveGroupCall();
+                      } else {
+                        void handleJoinGroupCall(activeChat);
+                      }
+                    }}
+                    title={isCurrentGroupCall ? "Отключиться" : "Подключиться"}
+                  >
+                    {isCurrentGroupCall ? <PhoneOff size={22} /> : <PhoneCall size={22} />}
+                  </button>
+                </div>
+              </section>
+            )}
+
             <div className="messages" ref={parentRef}>
               <div
+                className="messages-virtual-canvas"
                 style={{
                   height: `${virtualizer.getTotalSize()}px`,
-                  width: "100%",
-                  position: "relative",
                 }}
               >
                 {virtualizer.getVirtualItems().map((virtualItem) => {
@@ -2760,18 +3203,12 @@ const App: React.FC = () => {
                   );
                   return (
                     <div
+                      className="messages-virtual-item"
                       key={virtualItem.key}
                       data-index={virtualItem.index}
                       ref={virtualizer.measureElement}
                       style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
                         transform: `translateY(${virtualItem.start}px)`,
-                        display: "flex",
-                        flexDirection: "column",
-                        paddingBottom: "20px",
                       }}
                     >
                       <MessageBubble
@@ -2825,6 +3262,32 @@ const App: React.FC = () => {
                   </span>
                   <button onClick={stopRecording} className="btn-stop-rec">
                     Stop
+                  </button>
+                </div>
+              )}
+              {isVideoRecording && (
+                <div className="video-recording-status">
+                  <div className="video-recording-preview">
+                    <video
+                      ref={videoRecordingPreviewRef}
+                      autoPlay
+                      muted
+                      playsInline
+                    />
+                    <span className="video-recording-pulse" />
+                  </div>
+                  <div className="video-recording-meta">
+                    <span className="video-recording-title">Видео</span>
+                    <span className="video-recording-time">
+                      {Math.floor(videoRecordingDuration / 60)}:
+                      {(videoRecordingDuration % 60).toString().padStart(2, "0")}
+                    </span>
+                  </div>
+                  <button type="button" onClick={cancelVideoNoteRecording} className="btn-video-rec cancel">
+                    <X size={16} />
+                  </button>
+                  <button type="button" onClick={stopVideoNoteRecording} className="btn-video-rec send">
+                    <Send size={16} />
                   </button>
                 </div>
               )}
@@ -3029,10 +3492,10 @@ const App: React.FC = () => {
                       }
                       value={messageText}
                       onChange={(e) => setMessageText(e.target.value)}
-                      disabled={isRecording || isVideoRecording || isAiLoading}
+                      disabled={isRecording || isVideoRecording}
                     />
                     {messageText.trim() ? (
-                      <button type="submit" className="send-btn" disabled={isAiLoading}>
+                      <button type="submit" className="send-btn">
                         <Send size={18} />
                       </button>
                     ) : (
@@ -3300,37 +3763,39 @@ const App: React.FC = () => {
               </span>
             </div>
 
-            <div
-              className="menu-drawer-item"
-              onClick={() => {
-                setShowMenuDrawer(false);
-                setShowContactsModal(true);
-              }}
-            >
-              <div className="menu-drawer-item-left">
-                <Users size={18} className="menu-drawer-item-icon" />
-                <span>Контакты</span>
-              </div>
-              <span
-                style={{
-                  fontSize: "0.75rem",
-                  background: "rgba(255, 255, 255, 0.05)",
-                  color: "var(--text-secondary)",
-                  padding: "1px 6px",
-                  borderRadius: "10px",
+            {showContactsEntry && (
+              <div
+                className="menu-drawer-item"
+                onClick={() => {
+                  setShowMenuDrawer(false);
+                  setShowContactsModal(true);
                 }}
               >
-                {
-                  onlineUsers.filter(
-                    (u) =>
-                      (chats[u.id]?.messages &&
-                        chats[u.id].messages.length > 0) ||
-                      u.id === activeChat ||
-                      u.id === user.id,
-                  ).length
-                }
-              </span>
-            </div>
+                <div className="menu-drawer-item-left">
+                  <Users size={18} className="menu-drawer-item-icon" />
+                  <span>Контакты</span>
+                </div>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    background: "rgba(255, 255, 255, 0.05)",
+                    color: "var(--text-secondary)",
+                    padding: "1px 6px",
+                    borderRadius: "10px",
+                  }}
+                >
+                  {
+                    onlineUsers.filter(
+                      (u) =>
+                        (chats[u.id]?.messages &&
+                          chats[u.id].messages.length > 0) ||
+                        u.id === activeChat ||
+                        u.id === user.id,
+                    ).length
+                  }
+                </span>
+              </div>
+            )}
 
             <div
               className="menu-drawer-item"
@@ -3645,7 +4110,7 @@ const App: React.FC = () => {
       {/* ==========================================================================
          CONTACTS LIST OVERLAY 
          ========================================================================== */}
-      {showContactsModal && (
+      {showContactsModal && showContactsEntry && (
         <div
           className="modal active"
           onClick={() => setShowContactsModal(false)}

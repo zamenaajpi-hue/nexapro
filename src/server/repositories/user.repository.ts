@@ -7,6 +7,9 @@ export const userRepository = {
   findByEmail: async (email: string) => 
     db.user.findUnique({ where: { email } }),
 
+  findByNormalizedPhone: async (normalizedPhone: string) =>
+    db.user.findUnique({ where: { normalizedPhone } }),
+
   findById: async (id: string) => 
     db.user.findUnique({ where: { id } }),
 

@@ -51,7 +51,9 @@ try {
   console.error('[INIT ERROR]', error);
 }
 
-if ('serviceWorker' in navigator) {
+const isElectronRenderer = typeof window !== 'undefined' && Boolean((window as any).electron?.isElectron);
+
+if ('serviceWorker' in navigator && !isElectronRenderer) {
   if (import.meta.env.PROD) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').catch(err => {

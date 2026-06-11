@@ -25,6 +25,14 @@ const normalizePhone = (phone?: string | null) => {
   return digits;
 };
 
+const duplicateProfileMessage = (err: any) => {
+  if (err?.code !== 'P2002') return null;
+  const target = Array.isArray(err?.meta?.target) ? err.meta.target : [];
+  if (target.includes('normalizedPhone')) return 'Этот номер телефона уже привязан к другому аккаунту';
+  if (target.includes('nickname')) return 'Этот никнейм уже занят';
+  return 'Такие данные уже используются другим аккаунтом';
+};
+
 const safeMember = (member: any) => ({
   ...member,
   user: member.user ? publicUserDto(member.user) : member.user,
@@ -124,13 +132,22 @@ export const handleUsers = (
       const currentUser = await userRepository.findById(userId);
       if (!currentUser) return;
 
+      const normalizedPhone = data.phoneNumber === undefined ? undefined : normalizePhone(data.phoneNumber);
+      if (normalizedPhone) {
+        const existingPhone = await userRepository.findByNormalizedPhone(normalizedPhone);
+        if (existingPhone && existingPhone.id !== userId) {
+          socket.emit('profile:update:error', { error: 'Этот номер телефона уже привязан к другому аккаунту' });
+          return;
+        }
+      }
+
       const updateData: any = {
         nickname: data.nickname,
         avatarColor: data.avatarColor,
         avatarImage: data.avatarImage,
         bio: data.bio,
         phoneNumber: data.phoneNumber,
-        normalizedPhone: data.phoneNumber === undefined ? undefined : normalizePhone(data.phoneNumber),
+        normalizedPhone,
         activityStatus: data.activityStatus,
         firstName: data.firstName,
         lastName: data.lastName,
@@ -150,7 +167,13 @@ export const handleUsers = (
         io.emit('users:online', publicUsersDto(Array.from(onlineUsers.values())));
       }
     } catch (err) {
+      const duplicate = duplicateProfileMessage(err);
+      if (duplicate) {
+        socket.emit('profile:update:error', { error: duplicate });
+        return;
+      }
       console.error('[DB_ERR] Profile update failed:', err);
+      socket.emit('profile:update:error', { error: 'Не удалось сохранить профиль' });
     }
   });
 

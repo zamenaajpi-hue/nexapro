@@ -16,7 +16,14 @@ const normalizePhone = (phone?: string | null) => {
 export const authService = {
   register: async (data: any) => {
     const existing = await userRepository.findByEmailOrNickname(data.email, data.nickname);
-    if (existing) throw new Error('User already exists');
+    if (existing?.email === data.email) throw new Error('Пользователь с такой почтой уже существует');
+    if (existing?.nickname === data.nickname) throw new Error('Этот никнейм уже занят');
+
+    const normalizedPhone = normalizePhone(data.phoneNumber);
+    if (normalizedPhone) {
+      const existingPhone = await userRepository.findByNormalizedPhone(normalizedPhone);
+      if (existingPhone) throw new Error('Этот номер телефона уже привязан к другому аккаунту');
+    }
 
     const passwordHash = await bcrypt.hash(data.password, 10);
     const role = 'user';
@@ -35,7 +42,7 @@ export const authService = {
     const user = await userRepository.create({
       email: data.email,
       phoneNumber: data.phoneNumber || null,
-      normalizedPhone: normalizePhone(data.phoneNumber),
+      normalizedPhone,
       nickname: data.nickname,
       nexaId,
       passwordHash,

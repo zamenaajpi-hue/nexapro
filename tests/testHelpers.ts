@@ -2,6 +2,7 @@ export const leakedUserFields = [
   'socketId',
   'email',
   'phoneNumber',
+  'googleSub',
   'dateOfBirth',
   'role',
   'balance',

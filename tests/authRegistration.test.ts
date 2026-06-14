@@ -8,7 +8,7 @@ const unique = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toSt
 describe('auth registration', () => {
   it('rejects duplicate phone numbers with a user-facing error', async () => {
     const existingId = unique('phone-owner');
-    const phoneNumber = '+7 (999) 111-22-33';
+    const phoneNumber = '+79991112233';
     const normalizedPhone = '79991112233';
 
     await db.user.create({
@@ -29,7 +29,7 @@ describe('auth registration', () => {
           email: `${unique('new-phone-user')}@example.test`,
           nickname: unique('new-phone-user'),
           password: 'secret123',
-          phoneNumber: '8 999 111 22 33',
+          phoneNumber: '89991112233',
           avatarColor: '#6C63FF',
         }),
         /Этот номер телефона уже привязан к другому аккаунту/,
@@ -37,5 +37,18 @@ describe('auth registration', () => {
     } finally {
       await db.user.deleteMany({ where: { id: existingId } });
     }
+  });
+
+  it('rejects phone numbers outside +7XXXXXXXXXX or 8XXXXXXXXXX', async () => {
+    await assert.rejects(
+      authService.register({
+        email: `${unique('bad-phone-user')}@example.test`,
+        nickname: unique('bad-phone-user'),
+        password: 'secret123',
+        phoneNumber: '+1 555 111 22 33',
+        avatarColor: '#6C63FF',
+      }),
+      /Введите номер в формате \+7XXXXXXXXXX или 8XXXXXXXXXX/,
+    );
   });
 });

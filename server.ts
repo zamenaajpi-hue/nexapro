@@ -248,6 +248,7 @@ async function startServer() {
   });
   app.post('/api/auth/register', authRateLimit, authController.register);
   app.post('/api/auth/login', authRateLimit, authController.login);
+  app.post('/api/auth/google', authRateLimit, authController.google);
 
   // --- Users Routes ---
   app.get('/api/users', authenticateUser, async (req: any, res) => {

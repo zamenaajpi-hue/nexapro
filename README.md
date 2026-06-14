@@ -53,6 +53,23 @@ Production notes:
 - Configure `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VITE_VAPID_PUBLIC_KEY` before enabling web push.
 - Use external object storage such as S3, MinIO, or R2 for production uploads.
 
+## Google Sign-In
+
+Create a Google OAuth 2.0 Client ID with application type `Web application`, then set the same public client ID in:
+
+```env
+GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+VITE_GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+```
+
+Authorized JavaScript origins must include each origin where Nexa runs:
+
+- `http://localhost:3000` for local development.
+- `http://127.0.0.1:47832` for the default desktop app local server.
+- Your production HTTPS origin, for example `https://nexa.example.com`.
+
+`npm run build` writes the public client ID into `public/runtime-config.json`, which is copied into `dist` so the packaged desktop server can verify Google sign-ins without shipping server secrets.
+
 ## Database Migrations
 
 Use Prisma migrations for schema changes that must be reviewed and deployed safely.

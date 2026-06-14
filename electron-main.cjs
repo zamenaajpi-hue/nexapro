@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, session } = require('electron');
+﻿const { app, BrowserWindow, Menu, Tray, ipcMain, shell, nativeImage, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -187,6 +187,7 @@ async function startLocalServer() {
     STATIC_DIST_PATH: getPackagedDistPath(),
     DATABASE_URL: process.env.DATABASE_URL || `file:${desktopDbPath.replace(/\\/g, '/')}`,
     JWT_SECRET: jwtSecret,
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || process.env.NEXA_GOOGLE_CLIENT_ID || '',
   };
   Object.assign(process.env, env);
   delete process.env.ELECTRON_RUN_AS_NODE;
@@ -285,6 +286,15 @@ function getAppIcon() {
   return nativeImage.createFromDataURL(EMBEDDED_ICON_BASE64);
 }
 
+function isGoogleAuthPopupUrl(urlToCheck) {
+  try {
+    const parsedUrl = new URL(urlToCheck);
+    return parsedUrl.protocol === 'https:' && parsedUrl.hostname === 'accounts.google.com';
+  } catch {
+    return false;
+  }
+}
+
 // Perform active discovery to check which URL is live
 async function findActiveServerUrl() {
   // 1. Packaged local server for the desktop app.
@@ -317,8 +327,8 @@ async function findActiveServerUrl() {
     return preUrl;
   }
 
-  // No active online server found, fallback to settings interface
-  return null;
+  // No active server found. Do not open a manual connection settings screen.
+  return 'http://localhost:3000';
 }
 
 async function createMainWindow() {
@@ -347,8 +357,8 @@ async function createMainWindow() {
     console.log(`Connecting Nexa to active server: ${activeUrl}`);
     mainWindow.loadURL(activeUrl);
   } else {
-    console.log('No active servers found. Opening Connection Panel...');
-    mainWindow.loadFile(path.join(__dirname, 'electron-settings.html'));
+    console.log('No active servers found. Loading default Nexa URL...');
+    mainWindow.loadURL('http://localhost:3000');
   }
 
   // Show window when content is loaded
@@ -356,8 +366,29 @@ async function createMainWindow() {
     mainWindow.show();
   });
 
-  // Handle link clicking to open in external browser
+  // Handle link clicking to open in external browser, while keeping Google OAuth popups attached to Nexa.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isGoogleAuthPopupUrl(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 520,
+          height: 720,
+          minWidth: 420,
+          minHeight: 560,
+          title: 'Вход через Google',
+          parent: mainWindow,
+          modal: false,
+          backgroundColor: '#101113',
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true,
+          },
+        },
+      };
+    }
+
     if (url.startsWith('http:') || url.startsWith('https:')) {
       shell.openExternal(url);
     }
@@ -426,28 +457,8 @@ function createTray() {
 // Setup IPC Message handlers from React / Settings page
 function setupIpcHandlers() {
   // Clear any existing listeners first to prevent duplicates on manual reloads
-  ipcMain.removeAllListeners('save-url');
-  ipcMain.removeHandler('test-url');
-  ipcMain.removeHandler('get-saved-url');
   ipcMain.removeHandler('get-media-devices');
   ipcMain.removeHandler('media:request-permission');
-
-  ipcMain.on('save-url', (event, url) => {
-    console.log(`Saving custom server URL to local config: ${url}`);
-    saveServerUrl(url);
-    if (mainWindow) {
-      mainWindow.loadURL(url);
-    }
-  });
-
-  ipcMain.handle('test-url', async (event, url) => {
-    console.log(`Testing connection strength to: ${url}`);
-    return await testServerConnection(url);
-  });
-
-  ipcMain.handle('get-saved-url', async () => {
-    return getSavedServerUrl() || 'http://localhost:3000';
-  });
 
   ipcMain.handle('media:request-permission', async () => true);
 
@@ -457,25 +468,16 @@ function setupIpcHandlers() {
 
 // Set up App Menu
 function setAppMenu() {
-  const currentUrl = getSavedServerUrl() || 'http://localhost:3000';
   const template = [
     {
       label: 'Файл',
       submenu: [
         {
-          label: 'Подключение (Настройки)',
-          click: () => {
-            if (mainWindow) {
-              mainWindow.loadFile(path.join(__dirname, 'electron-settings.html'));
-            }
-          }
-        },
-        {
           label: 'Переподключиться',
           accelerator: 'CmdOrCtrl+R',
           click: () => {
             if (mainWindow) mainWindow.webContents.reload();
-          }
+          },
         },
         { type: 'separator' },
         {
@@ -484,9 +486,9 @@ function setAppMenu() {
           click: () => {
             isQuitting = true;
             app.quit();
-          }
-        }
-      ]
+          },
+        },
+      ],
     },
     {
       label: 'Правка',
@@ -497,8 +499,8 @@ function setAppMenu() {
         { role: 'cut', label: 'Вырезать' },
         { role: 'copy', label: 'Копировать' },
         { role: 'paste', label: 'Вставить' },
-        { role: 'selectAll', label: 'Выбрать все' }
-      ]
+        { role: 'selectAll', label: 'Выбрать все' },
+      ],
     },
     {
       label: 'Вид',
@@ -511,33 +513,31 @@ function setAppMenu() {
         { role: 'zoomIn', label: 'Увеличить' },
         { role: 'zoomOut', label: 'Уменьшить' },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: 'Полноэкранный режим' }
-      ]
+        { role: 'togglefullscreen', label: 'Полноэкранный режим' },
+      ],
     },
     {
       label: 'Помощь',
       submenu: [
         {
           label: 'О приложении Nexa',
-          click: async () => {
+          click: () => {
             const { dialog } = require('electron');
-            const activeUrl = await findActiveServerUrl() || currentUrl;
             dialog.showMessageBox({
               type: 'info',
               title: 'О Nexa Desktop',
               message: 'Nexa Messenger для Windows',
-              detail: `Версия 1.0.0\nБезопасный и быстрый современный мессенджер.\nАктивный адрес подключения: ${activeUrl}`
+              detail: 'Версия 1.0.0\nБезопасный и быстрый современный мессенджер.',
             });
-          }
-        }
-      ]
-    }
+          },
+        },
+      ],
+    },
   ];
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }
-
 // Single instance lock to prevent launching multiple copies of the desktop app
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -591,3 +591,4 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+

@@ -178,6 +178,7 @@ async function startLocalServer() {
   const logPath = path.join(userDataPath, 'desktop-server.log');
   ensureDesktopDatabase(desktopDbPath);
   const jwtSecret = ensureDesktopJwtSecret(userDataPath);
+  const packagedGoogleClientId = readPackagedGoogleClientId();
   if (localServerStarted) return localServerUrl;
 
   const env = {
@@ -187,7 +188,7 @@ async function startLocalServer() {
     STATIC_DIST_PATH: getPackagedDistPath(),
     DATABASE_URL: process.env.DATABASE_URL || `file:${desktopDbPath.replace(/\\/g, '/')}`,
     JWT_SECRET: jwtSecret,
-    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || process.env.NEXA_GOOGLE_CLIENT_ID || '',
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || process.env.NEXA_GOOGLE_CLIENT_ID || packagedGoogleClientId || '',
   };
   Object.assign(process.env, env);
   delete process.env.ELECTRON_RUN_AS_NODE;
@@ -195,6 +196,7 @@ async function startLocalServer() {
 
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
   logStream.write(`\n[${new Date().toISOString()}] Starting local server ${serverPath} on ${port} in Electron main\n`);
+  logStream.write(`[${new Date().toISOString()}] Google Sign-In ${env.GOOGLE_CLIENT_ID ? 'enabled' : 'disabled'} for local server\n`);
   logStream.end();
 
   try {
@@ -292,6 +294,18 @@ function isGoogleAuthPopupUrl(urlToCheck) {
     return parsedUrl.protocol === 'https:' && parsedUrl.hostname === 'accounts.google.com';
   } catch {
     return false;
+  }
+}
+
+function readPackagedGoogleClientId() {
+  try {
+    const runtimeConfigPath = path.join(getPackagedDistPath(), 'runtime-config.json');
+    if (!fs.existsSync(runtimeConfigPath)) return '';
+    const config = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
+    const clientId = typeof config.googleClientId === 'string' ? config.googleClientId.trim() : '';
+    return clientId.endsWith('.apps.googleusercontent.com') ? clientId : '';
+  } catch {
+    return '';
   }
 }
 

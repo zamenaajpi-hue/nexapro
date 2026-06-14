@@ -1,6 +1,6 @@
 import { io, Socket } from "socket.io-client";
 import { isMobileOrCapacitor } from "../utils/api";
-import { readStoredServerUrl } from "../utils/serverUrl";
+import { readStoredServerUrl, saveStoredServerUrl } from "../utils/serverUrl";
 
 // Get saved dynamic server URL if it exists (highly important for Android/Capacitor)
 function getInitialSocketUrl(): string {
@@ -40,6 +40,27 @@ export const connectSocket = (token?: string) => {
   }
   if (!socket.connected) {
     socket.connect();
+  }
+};
+
+export const updateSocketUrl = (url: string, token?: string) => {
+  const nextUrl = saveStoredServerUrl(url);
+  const wasConnected = socket.connected;
+
+  if (wasConnected) {
+    socket.disconnect();
+  }
+
+  if (socket.io) {
+    (socket.io as any).uri = nextUrl;
+  }
+
+  if (token) {
+    socket.auth = { token };
+  }
+
+  if (wasConnected || token) {
+    connectSocket(token);
   }
 };
 

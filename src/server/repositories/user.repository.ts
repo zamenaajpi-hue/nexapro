@@ -7,6 +7,9 @@ export const userRepository = {
   findByEmail: async (email: string) => 
     db.user.findUnique({ where: { email } }),
 
+  findByGoogleSub: async (googleSub: string) =>
+    db.user.findUnique({ where: { googleSub } }),
+
   findByNormalizedPhone: async (normalizedPhone: string) =>
     db.user.findUnique({ where: { normalizedPhone } }),
 

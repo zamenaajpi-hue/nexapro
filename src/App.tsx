@@ -46,7 +46,6 @@ import SoundUtility from "./utils/sound";
 import { DecryptedText } from "./components/DecryptedText";
 import { resolveApiUrl } from "./utils/api";
 import { enablePushNotifications, disablePushNotifications } from "./utils/pushNotifications";
-import { updateSocketUrl } from "./socket/client";
 import type { ChannelPost } from "./types/chat";
 import type { NotificationType } from "./utils/notifications";
 
@@ -56,7 +55,6 @@ const CreateGroupModal = lazy(() => import("./components/modals/CreateGroupModal
 const CreateChannelModal = lazy(() => import("./components/modals/CreateChannelModal").then((module) => ({ default: module.CreateChannelModal })));
 const ProfileModal = lazy(() => import("./components/modals/ProfileModal").then((module) => ({ default: module.ProfileModal })));
 const AdminPanel = lazy(() => import("./components/modals/AdminPanel").then((module) => ({ default: module.AdminPanel })));
-const ServerConfigModal = lazy(() => import("./components/ServerConfigModal").then((module) => ({ default: module.ServerConfigModal })));
 
 type ImportedPhoneContact = {
   id: string;
@@ -132,6 +130,24 @@ const apiFetch = (
 
 // Shadow the global fetch identifier for this module
 const fetch = apiFetch;
+
+const readJsonResponse = async (response: Response, fallbackMessage: string) => {
+  const text = await response.text();
+  if (!text.trim()) {
+    if (response.ok) {
+      throw new Error(`${fallbackMessage}: пустой ответ сервера`);
+    }
+    return { error: `${fallbackMessage}: сервер вернул пустой ответ (${response.status})` };
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      error: `${fallbackMessage}: сервер вернул некорректный ответ (${response.status})`,
+    };
+  }
+};
 
 const resolveMediaUrl = (url?: string | null): string => {
   if (!url) return "";
@@ -237,8 +253,6 @@ const App: React.FC = () => {
     removeChannel,
   } = useChatStore();
 
-  const [, setServerConfigured] = useState(true);
-
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -270,7 +284,6 @@ const App: React.FC = () => {
   const [forwardSearchTerm, setForwardSearchTerm] = useState("");
 
   // Modals state
-  const [showSettings, setShowSettings] = useState(false);
   const [showMyProfile, setShowMyProfile] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [profileItem, setProfileItem] = useState<User | Group | Channel | null>(null);
@@ -402,12 +415,6 @@ const App: React.FC = () => {
   const [audioInitialized, setAudioInitialized] = useState(false);
 
   // Profile Edit State
-  const [editNickname, setEditNickname] = useState("");
-  const [editAvatarColor, setEditAvatarColor] = useState("");
-  const [editAvatarImage, setEditAvatarImage] = useState<string | null>(null);
-  const [editBio, setEditBio] = useState("");
-  const [editRole, setEditRole] = useState<"user" | "admin" | "owner">("user");
-
   // Admin Panel State
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [adminStats, setAdminStats] = useState<{
@@ -1409,6 +1416,11 @@ const App: React.FC = () => {
 
     socket.on("channel:history:result", ({ channelId, posts }) => {
       useChatStore.getState().setChannelPosts(channelId, posts);
+      if (activeChatRef.current === channelId) {
+        posts.forEach((post: ChannelPost) => {
+          socket.emit("channel:post:view", { postId: post.id });
+        });
+      }
     });
 
     socket.on("channel:post:new", ({ channelId, post }) => {
@@ -1498,7 +1510,6 @@ const App: React.FC = () => {
       if (user && updatedUser.id === user.id) {
         setUser(updatedUser);
         localStorage.setItem("nexa_user", JSON.stringify(updatedUser));
-        setShowSettings(false);
       }
     });
 
@@ -1851,16 +1862,6 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (showSettings && user) {
-      setEditNickname(user.nickname);
-      setEditAvatarColor(user.avatarColor);
-      setEditAvatarImage(user.avatarImage || null);
-      setEditBio(user.bio || "");
-      setEditRole(user.role || "user");
-    }
-  }, [showSettings, user]);
-
-  useEffect(() => {
     if (activeChat) {
       const activeItem = [...groups, ...channels].find(i => i.id === activeChat);
       const isChannel = activeItem && 'isChannel' in activeItem && activeItem.isChannel;
@@ -1916,6 +1917,16 @@ const App: React.FC = () => {
 
   // Removed messagesEndRef logic since we use virtualizer
 
+  const applyAuthSession = (data: { token: string; user: User }) => {
+    localStorage.setItem("nexa_token", data.token);
+    localStorage.setItem("nexa_user", JSON.stringify(data.user));
+    sessionExpiredDispatched = false;
+    setSessionMessage(null);
+
+    setUser(data.user);
+    connectSocket(data.token);
+  };
+
   const handleAuth = async (
     authMode: "login" | "register",
     email: string,
@@ -1958,16 +1969,36 @@ const App: React.FC = () => {
         body: JSON.stringify(body),
       });
 
-      const data = await res.json();
+      const data = await readJsonResponse(res, "Authentication failed");
       if (!res.ok) throw new Error(data.error || "Authentication failed");
 
-      localStorage.setItem("nexa_token", data.token);
-      localStorage.setItem("nexa_user", JSON.stringify(data.user));
-      sessionExpiredDispatched = false;
-      setSessionMessage(null);
+      applyAuthSession(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      setUser(data.user);
-      connectSocket(data.token);
+  const handleGoogleAuth = async (
+    googleToken: { credential?: string; accessToken?: string },
+    selectedColor: string,
+  ) => {
+    setLoading(true);
+    setError(null);
+    setSessionMessage(null);
+
+    try {
+      const res = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...googleToken, avatarColor: selectedColor }),
+      });
+
+      const data = await readJsonResponse(res, "Google sign-in failed");
+      if (!res.ok) throw new Error(data.error || "Google sign-in failed");
+
+      applyAuthSession(data);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -2465,15 +2496,6 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleUpdateProfile = () => {
-    socket.emit("profile:update", {
-      nickname: editNickname,
-      avatarColor: editAvatarColor,
-      avatarImage: editAvatarImage,
-      bio: editBio,
-    });
-  };
-
   const fetchAdminStats = async () => {
     try {
       const token = localStorage.getItem("nexa_token");
@@ -2631,17 +2653,6 @@ const App: React.FC = () => {
     }
   }, [showAdminPanel, adminTab, user]);
 
-  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setEditAvatarImage(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-  };
-
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     if (activeChat) setIsDragging(true);
@@ -2738,7 +2749,7 @@ const App: React.FC = () => {
       <>
         <LaunchSplash />
         <Suspense fallback={null}>
-          <AuthPage onAuth={handleAuth} loading={loading} error={error || sessionMessage} />
+        <AuthPage onAuth={handleAuth} onGoogleAuth={handleGoogleAuth} loading={loading} error={error || sessionMessage} />
         </Suspense>
       </>
     );
@@ -2748,7 +2759,6 @@ const App: React.FC = () => {
     <MainLayout
       setShowAdminPanel={setShowAdminPanel}
       setShowGroupModal={setShowGroupModal}
-      setShowSettings={setShowSettings}
       setShowMenuDrawer={setShowMenuDrawer}
       setShowCallsModal={setShowCallsModal}
       setShowContactsModal={setShowContactsModal}
@@ -3562,19 +3572,6 @@ const App: React.FC = () => {
         </Suspense>
       )}
 
-      {showSettings && (
-        <Suspense fallback={null}>
-          <ServerConfigModal
-            isVisible={showSettings}
-            onSubmit={(serverUrl) => {
-              updateSocketUrl(serverUrl);
-              setServerConfigured(true);
-              setShowSettings(false);
-            }}
-          />
-        </Suspense>
-      )}
-
       {showAdminPanel && user?.role === "admin" && (
         <Suspense fallback={null}>
           <AdminPanel
@@ -3879,6 +3876,9 @@ const App: React.FC = () => {
                 />
                 <span className="slider"></span>
               </label>
+            </div>
+            <div className="menu-drawer-version">
+              Nexa Desktop Версия 1.0 Beta Test
             </div>
           </div>
         </div>

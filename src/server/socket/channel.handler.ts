@@ -234,12 +234,25 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
         socket.emit('error', { message: 'Access denied' });
         return;
       }
-      
-      const updatedPost = await db.channelPost.update({
-        where: { id: postId },
-        data: { views: { increment: 1 } },
-        include: { author: true, reactions: true }
+
+      const updatedPost = await db.$transaction(async (tx: any) => {
+        try {
+          await tx.channelPostView.create({
+            data: { userId, postId }
+          });
+        } catch (err: any) {
+          if (err?.code === 'P2002') return null;
+          throw err;
+        }
+
+        return tx.channelPost.update({
+          where: { id: postId },
+          data: { views: { increment: 1 } },
+          include: { author: true, reactions: true }
+        });
       });
+
+      if (!updatedPost) return;
       
       const channel = await channelRepository.findById(updatedPost.channelId, true);
       if (channel) {

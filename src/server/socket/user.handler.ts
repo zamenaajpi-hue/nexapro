@@ -4,6 +4,7 @@ import { groupRepository } from '../repositories/group.repository';
 import { z } from 'zod';
 import { privateUserDto, publicUserDto, publicUsersDto } from '../utils/safeUser';
 import { messageRepository } from '../repositories/message.repository';
+import { INVALID_RUSSIAN_PHONE_MESSAGE, normalizeRussianPhone } from '../utils/phone';
 
 const profileUpdateSchema = z.object({
   nickname: z.string().min(2).optional(),
@@ -17,13 +18,6 @@ const profileUpdateSchema = z.object({
   activityStatus: z.string().nullable().optional(),
   publicKey: z.string().optional()
 });
-
-const normalizePhone = (phone?: string | null) => {
-  const digits = (phone || '').replace(/\D/g, '');
-  if (!digits) return null;
-  if (digits.length === 11 && (digits.startsWith('8') || digits.startsWith('7'))) return `7${digits.slice(1)}`;
-  return digits;
-};
 
 const duplicateProfileMessage = (err: any) => {
   if (err?.code !== 'P2002') return null;
@@ -132,7 +126,7 @@ export const handleUsers = (
       const currentUser = await userRepository.findById(userId);
       if (!currentUser) return;
 
-      const normalizedPhone = data.phoneNumber === undefined ? undefined : normalizePhone(data.phoneNumber);
+      const normalizedPhone = data.phoneNumber === undefined ? undefined : normalizeRussianPhone(data.phoneNumber);
       if (normalizedPhone) {
         const existingPhone = await userRepository.findByNormalizedPhone(normalizedPhone);
         if (existingPhone && existingPhone.id !== userId) {
@@ -170,6 +164,10 @@ export const handleUsers = (
       const duplicate = duplicateProfileMessage(err);
       if (duplicate) {
         socket.emit('profile:update:error', { error: duplicate });
+        return;
+      }
+      if (err.message === INVALID_RUSSIAN_PHONE_MESSAGE) {
+        socket.emit('profile:update:error', { error: err.message });
         return;
       }
       console.error('[DB_ERR] Profile update failed:', err);

@@ -11,7 +11,6 @@ import type { Channel, ChatItem, ChatStateRecord, Group, Message, User } from '.
 interface SidebarProps {
   setShowAdminPanel: (show: boolean) => void;
   setShowGroupModal: (show: boolean) => void;
-  setShowSettings: (show: boolean) => void;
   setShowMenuDrawer: (show: boolean) => void;
   setShowCallsModal: (show: boolean) => void;
   isMobileActive?: boolean;

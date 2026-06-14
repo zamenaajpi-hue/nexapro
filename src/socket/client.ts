@@ -22,17 +22,6 @@ export const socket: Socket = io(getInitialSocketUrl(), {
   autoConnect: false, // Prevents aggressive connection attempts prior to server discovery on mobile
 });
 
-// Update the target endpoint dynamically (e.g., when a user saves configurations in settings)
-export const updateSocketUrl = (newUrl: string) => {
-  const cleanUrl = newUrl.replace(/\/$/, "");
-  if (socket.io) {
-    (socket.io as any).uri = cleanUrl;
-  }
-  if (socket.connected) {
-    socket.disconnect().connect();
-  }
-};
-
 export const connectSocket = (token?: string) => {
   // Ensure the Socket URL is fresh in case it was updated
   const currentUrl = getInitialSocketUrl();

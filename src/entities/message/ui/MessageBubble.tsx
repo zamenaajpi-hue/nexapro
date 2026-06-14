@@ -271,14 +271,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {waveformBars.map((height, index) => (
                     <span
                       key={`${msg.id}-bar-${index}`}
-                      className={index / waveformBars.length <= audioProgress ? 'played' : ''}
+                      className={(index + 1) / waveformBars.length <= audioProgress ? 'played' : ''}
                       style={{ height: `${height}px` }}
                     />
                   ))}
                 </button>
                 <div className="voice-meta">
                   <span>{audioTimeLabel}</span>
-                  <span>voice</span>
+                  <span>Голосовое</span>
                 </div>
               </div>
             </div>

@@ -10,6 +10,7 @@ datasource db {
 model User {
   id             String        @id @default(uuid())
   email          String?       @unique
+  googleSub      String?       @unique
   phoneNumber    String?
   normalizedPhone String?      @unique
   nickname       String        @unique
@@ -42,6 +43,7 @@ model User {
   channelMembers  ChannelMember[]
   channelPosts    ChannelPost[]
   channelReactions ChannelReaction[]
+  channelPostViews ChannelPostView[]
   chatStates      ChatState[]
   messageReceipts MessageReceipt[]
   createdPolls    Poll[]          @relation("CreatedPolls")
@@ -175,6 +177,19 @@ model ChannelPost {
   author      User    @relation(fields: [authorId], references: [id])
 
   reactions   ChannelReaction[]
+  viewRecords ChannelPostView[]
+}
+
+model ChannelPostView {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId    String
+  post      ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime    @default(now())
+
+  @@unique([userId, postId])
+  @@index([postId])
 }
 
 model ChannelReaction {

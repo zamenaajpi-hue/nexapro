@@ -4,6 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const { dialog } = require('electron');
 
 let mainWindow;
 let tray;
@@ -12,6 +13,9 @@ let localServerProcess = null;
 let localServerUrl = null;
 let localServerStarted = false;
 const DESKTOP_SERVER_PORT = Number(process.env.NEXA_DESKTOP_PORT || 47832);
+const MEDIA_PERMISSIONS = new Set(['media', 'microphone', 'camera']);
+const mediaPermissionDecisions = new Map();
+const DEFAULT_REMOTE_SERVER_URL = process.env.NEXA_DEFAULT_SERVER_URL || 'http://64.188.67.71:3000';
 
 // Config file path for persistent settings
 function getConfigPath() {
@@ -40,6 +44,16 @@ function saveServerUrl(url) {
     fs.writeFileSync(configPath, JSON.stringify({ serverUrl: url }), 'utf8');
   } catch (e) {
     console.error('Error writing config:', e);
+  }
+}
+
+function isLoopbackServerUrl(urlToCheck) {
+  try {
+    const { hostname } = new URL(urlToCheck);
+    const normalizedHost = hostname.toLowerCase();
+    return normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost === '::1';
+  } catch {
+    return false;
   }
 }
 
@@ -311,31 +325,45 @@ function readPackagedGoogleClientId() {
 
 // Perform active discovery to check which URL is live
 async function findActiveServerUrl() {
-  // 1. Packaged local server for the desktop app.
+  // 1. Saved non-local server URL. Prefer this so desktop and mobile stay on the same backend.
+  const savedUrl = getSavedServerUrl();
+  const savedUrlIsLoopback = savedUrl ? isLoopbackServerUrl(savedUrl) : false;
+  if (savedUrl && !savedUrlIsLoopback && await testServerConnection(savedUrl)) {
+    return savedUrl;
+  }
+
+  // 2. Default remote Nexa server. This prevents stale desktop localhost configs from splitting PC/phone sync.
+  if (await testServerConnection(DEFAULT_REMOTE_SERVER_URL)) {
+    if (savedUrlIsLoopback) {
+      saveServerUrl(DEFAULT_REMOTE_SERVER_URL);
+    }
+    return DEFAULT_REMOTE_SERVER_URL;
+  }
+
+  // 3. Saved loopback/local URL only if the shared server is unavailable.
+  if (savedUrl && await testServerConnection(savedUrl)) {
+    return savedUrl;
+  }
+
+  // 4. Packaged local server for standalone desktop mode.
   const packagedUrl = await startLocalServer();
   if (packagedUrl) {
     return packagedUrl;
   }
 
-  // 2. Saved Custom Server URL
-  const savedUrl = getSavedServerUrl();
-  if (savedUrl && await testServerConnection(savedUrl)) {
-    return savedUrl;
-  }
-
-  // 3. Localhost Server (port 3000 is our template's default)
+  // 5. Localhost Server (port 3000 is our template's default)
   const localUrl = 'http://localhost:3000';
   if (await testServerConnection(localUrl)) {
     return localUrl;
   }
 
-  // 4. active development URL on AI Studio container
+  // 6. active development URL on AI Studio container
   const devUrl = 'https://ais-dev-7bgky7op2qkpdmgoz7hysn-816012459690.europe-west2.run.app';
   if (await testServerConnection(devUrl)) {
     return devUrl;
   }
 
-  // 5. production URL
+  // 7. production URL
   const preUrl = 'https://ais-pre-7bgky7op2qkpdmgoz7hysn-816012459690.europe-west2.run.app';
   if (await testServerConnection(preUrl)) {
     return preUrl;
@@ -473,11 +501,30 @@ function setupIpcHandlers() {
   // Clear any existing listeners first to prevent duplicates on manual reloads
   ipcMain.removeHandler('get-media-devices');
   ipcMain.removeHandler('media:request-permission');
+  ipcMain.removeHandler('server:get-saved-url');
+  ipcMain.removeHandler('server:test-url');
+  ipcMain.removeHandler('server:save-url');
 
   ipcMain.handle('media:request-permission', async () => true);
 
   // Device enumeration must happen in the renderer, where navigator.mediaDevices exists.
   ipcMain.handle('get-media-devices', async () => []);
+
+  ipcMain.handle('server:get-saved-url', async () => getSavedServerUrl() || DEFAULT_REMOTE_SERVER_URL);
+
+  ipcMain.handle('server:test-url', async (_event, url) => testServerConnection(url));
+
+  ipcMain.handle('server:save-url', async (_event, url) => {
+    if (typeof url !== 'string' || !url.trim()) {
+      return false;
+    }
+    const normalizedUrl = url.trim().replace(/\/$/, '');
+    saveServerUrl(normalizedUrl);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(normalizedUrl);
+    }
+    return true;
+  });
 }
 
 // Set up App Menu
@@ -552,6 +599,60 @@ function setAppMenu() {
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }
+
+function getPermissionRequestOrigin(webContents, details) {
+  try {
+    const requestUrl = details?.requestingUrl || details?.embeddingOrigin || webContents.getURL();
+    return new URL(requestUrl).origin;
+  } catch {
+    return null;
+  }
+}
+
+function isTrustedMediaPermissionRequest(webContents, details) {
+  if (!mainWindow || webContents !== mainWindow.webContents) return false;
+
+  try {
+    const currentUrl = new URL(webContents.getURL());
+    const requestOrigin = getPermissionRequestOrigin(webContents, details);
+    return Boolean(
+      requestOrigin &&
+      ['http:', 'https:'].includes(currentUrl.protocol) &&
+      requestOrigin === currentUrl.origin
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function confirmMediaPermission(webContents, permission, details) {
+  const origin = getPermissionRequestOrigin(webContents, details);
+  if (!origin || !isTrustedMediaPermissionRequest(webContents, details)) {
+    console.warn(`[Electron] Permission denied from untrusted context: ${permission}`);
+    return false;
+  }
+
+  const cacheKey = `${origin}:${permission}`;
+  if (mediaPermissionDecisions.has(cacheKey)) {
+    return mediaPermissionDecisions.get(cacheKey);
+  }
+
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['Разрешить', 'Запретить'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Доступ к устройствам',
+    message: 'Nexa запрашивает доступ к камере или микрофону',
+    detail: `Источник: ${origin}\nРазрешение: ${permission}`,
+    noLink: true,
+  });
+
+  const allowed = result.response === 0;
+  mediaPermissionDecisions.set(cacheKey, allowed);
+  console.log(`[Electron] Permission ${allowed ? 'granted' : 'denied'}: ${permission} (${origin})`);
+  return allowed;
+}
 // Single instance lock to prevent launching multiple copies of the desktop app
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -567,16 +668,20 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
-    // Setup permission handler for microphone and camera access
-    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-      const allowedPermissions = ['microphone', 'camera', 'media'];
-      if (allowedPermissions.includes(permission)) {
-        console.log(`[Electron] Permission granted: ${permission}`);
-        callback(true);
-      } else {
+    // Ask before granting camera/microphone access and only trust the active Nexa window origin.
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+      if (!MEDIA_PERMISSIONS.has(permission)) {
         console.log(`[Electron] Permission denied: ${permission}`);
         callback(false);
+        return;
       }
+
+      confirmMediaPermission(webContents, permission, details)
+        .then(callback)
+        .catch((error) => {
+          console.warn(`[Electron] Permission prompt failed for ${permission}:`, error);
+          callback(false);
+        });
     });
 
     createMainWindow();

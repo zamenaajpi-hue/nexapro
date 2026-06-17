@@ -23,9 +23,9 @@
     "desktop": "npx electron .",
     "desktop:build": "npx electron-builder",
     "android:add": "npx cap add android",
-    "android:sync": "npx cap sync",
+    "android:sync": "npx cap sync && node scripts/prune-android-assets.cjs",
     "android:open": "npx cap open android",
-    "android:build": "npm run build && npx cap sync"
+    "android:build": "npm run build && npx cap sync && node scripts/prune-android-assets.cjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

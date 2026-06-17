@@ -54,8 +54,8 @@ async function startServer() {
       errorStr.includes('ConnectorError')
     ) {
       try {
-        if (process.env.NODE_ENV === 'production') {
-          logger.error('Database self-healing is disabled in production to prevent accidental data loss.');
+        if (process.env.NODE_ENV === 'production' || process.env.NEXA_DEV_DB_SELF_HEAL !== 'reset') {
+          logger.error('Database reset self-healing is disabled. Set NEXA_DEV_DB_SELF_HEAL=reset in local development to recreate a corrupted SQLite database.');
           process.exit(1);
         }
         const { db } = await import('./src/services/db');
@@ -67,13 +67,13 @@ async function startServer() {
         }
 
         const dbPath = path.join(process.cwd(), 'prisma', 'dev.db');
-        logger.warn(`Removing malformed/corrupted SQLite database file: ${dbPath}`);
+        logger.warn(`Backing up malformed/corrupted SQLite database file: ${dbPath}`);
         if (fs.existsSync(dbPath)) {
-          fs.unlinkSync(dbPath);
+          fs.renameSync(dbPath, `${dbPath}.corrupt-${Date.now()}.bak`);
         }
         
         logger.info('Recreating database schema with npx prisma db push...');
-        execSync('npx prisma db push --accept-data-loss', { stdio: 'inherit' });
+        execSync('npx prisma db push', { stdio: 'inherit' });
         logger.info('Database self-healing successful!');
       } catch (healingError) {
         logger.error({ healingError }, 'Failed to self-heal the database.');
@@ -104,9 +104,16 @@ async function startServer() {
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
+  const trustedAppOrigins = new Set([
+    'http://localhost',
+    'https://localhost',
+    'capacitor://localhost',
+    'ionic://localhost',
+  ]);
   const allowAnyOrigin = process.env.NODE_ENV !== 'production' && allowedOrigins.length === 0;
   const isAllowedOrigin = (origin?: string) => {
     if (!origin) return true;
+    if (trustedAppOrigins.has(origin)) return true;
     if (allowAnyOrigin) return true;
     return allowedOrigins.includes(origin);
   };

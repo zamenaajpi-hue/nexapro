@@ -243,12 +243,16 @@
     <div class="form-group">
       <label for="server-url">Адрес сервера (URL)</label>
       <div class="input-wrapper">
-        <input type="text" id="server-url" value="http://localhost:3000" placeholder="http://localhost:3000" autocomplete="off" spellcheck="false" />
+        <input type="text" id="server-url" value="http://64.188.67.71:3000" placeholder="http://64.188.67.71:3000" autocomplete="off" spellcheck="false" />
       </div>
     </div>
 
     <div class="presets-title">Быстрый выбор</div>
     <div class="presets">
+      <button class="preset-btn" onclick="selectPreset('http://64.188.67.71:3000')">
+        <span>NEXA server (64.188.67.71:3000)</span>
+        <span class="preset-badge">NEXA</span>
+      </button>
       <button class="preset-btn" onclick="selectPreset('http://localhost:3000')">
         <span>Локальный запуск (localhost:3000)</span>
         <span class="preset-badge">Local</span>

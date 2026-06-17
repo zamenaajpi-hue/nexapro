@@ -7,4 +7,7 @@ contextBridge.exposeInMainWorld('electron', {
   updateUnreadCount: (count) => ipcRenderer.send('update-badge', count),
   getMediaDevices: () => ipcRenderer.invoke('get-media-devices'),
   requestMediaPermission: (constraints) => ipcRenderer.invoke('media:request-permission', constraints),
+  getSavedUrl: () => ipcRenderer.invoke('server:get-saved-url'),
+  testUrl: (url) => ipcRenderer.invoke('server:test-url', url),
+  saveUrl: (url) => ipcRenderer.invoke('server:save-url', url),
 });

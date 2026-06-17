@@ -10,7 +10,7 @@ const config: CapacitorConfig = {
     },
   },
   server: {
-    androidScheme: 'https',
+    androidScheme: 'http',
     cleartext: true, // Facilitate testing with local HTTP backend servers (e.g., http://192.168.x.x:3000)
     allowNavigation: ['*']
   }

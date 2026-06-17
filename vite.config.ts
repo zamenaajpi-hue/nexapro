@@ -16,14 +16,16 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
     build: {
+      target: 'es2020',
       rollupOptions: {
         output: {
           manualChunks(id) {
             if (!id.includes('node_modules')) return undefined;
+            if (id.includes('@capacitor/')) return 'vendor-capacitor';
             if (id.includes('socket.io-client') || id.includes('engine.io-client')) return 'vendor-realtime';
             if (id.includes('lucide-react')) return 'vendor-icons';
             if (id.includes('motion')) return 'vendor-motion';
-            return 'vendor';
+            return undefined;
           },
         },
       },

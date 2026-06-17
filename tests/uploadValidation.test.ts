@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { extensionFromMime, hasExpectedFileSignature, isAllowedUploadMime } from '../src/server/utils/fileValidation';
+import { detectFileSignature, extensionFromMime, hasExpectedFileSignature, isAllowedUploadMime } from '../src/server/utils/fileValidation';
 
 function withTempFile(bytes: Buffer, fn: (filePath: string) => void) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexa-upload-'));
@@ -22,6 +22,7 @@ describe('upload validation', () => {
     assert.equal(isAllowedUploadMime('image/png; charset=binary'), true);
     assert.equal(isAllowedUploadMime('IMAGE/JPEG'), true);
     assert.equal(isAllowedUploadMime('video/mp4'), true);
+    assert.equal(isAllowedUploadMime('video/x-matroska'), true);
     assert.equal(isAllowedUploadMime('audio/ogg'), true);
     assert.equal(extensionFromMime('application/pdf'), '.pdf');
     assert.equal(isAllowedUploadMime('text/html'), false);
@@ -41,7 +42,14 @@ describe('upload validation', () => {
     });
 
     withTempFile(Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32]), (filePath) => {
+      assert.equal(detectFileSignature(filePath), 'video/mp4');
       assert.equal(hasExpectedFileSignature(filePath, 'video/mp4'), true);
+    });
+
+    withTempFile(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x93, 0x42, 0x82, 0x88]), (filePath) => {
+      assert.equal(detectFileSignature(filePath), 'video/webm');
+      assert.equal(hasExpectedFileSignature(filePath, 'video/webm;codecs=vp8,opus'), true);
+      assert.equal(hasExpectedFileSignature(filePath, 'video/x-matroska'), true);
     });
   });
 

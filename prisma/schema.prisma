@@ -43,6 +43,7 @@ model User {
   channelMembers  ChannelMember[]
   channelPosts    ChannelPost[]
   channelReactions ChannelReaction[]
+  channelComments ChannelComment[]
   channelPostViews ChannelPostView[]
   chatStates      ChatState[]
   messageReceipts MessageReceipt[]
@@ -177,7 +178,22 @@ model ChannelPost {
   author      User    @relation(fields: [authorId], references: [id])
 
   reactions   ChannelReaction[]
+  comments    ChannelComment[]
   viewRecords ChannelPostView[]
+}
+
+model ChannelComment {
+  id        String      @id @default(uuid())
+  postId    String
+  post      ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  text      String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([postId])
+  @@index([authorId])
 }
 
 model ChannelPostView {

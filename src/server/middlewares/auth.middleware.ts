@@ -2,14 +2,14 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { userRepository } from '../repositories/user.repository';
 import { getJwtSecret } from '../config/auth';
+import { readTokenFromRequest } from '../utils/sessionCookie';
 
 export const authenticateUser = async (req: Request | any, res: Response | any, next: NextFunction | any) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = readTokenFromRequest(req);
+    if (!token) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, getJwtSecret()) as { userId: string };
     const user = await userRepository.findById(decoded.userId);
     

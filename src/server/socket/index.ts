@@ -8,13 +8,14 @@ import { handleStories } from './story.handler';
 import { handleChannels } from './channel.handler';
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../config/auth';
+import { readTokenFromCookieHeader } from '../utils/sessionCookie';
 
 export const setupSocketHandlers = (io: SocketIOServer) => {
   const onlineUsers = new Map<string, any>(); 
   const socketToUserMap = new Map<string, string>(); 
 
   io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
+    const token = socket.handshake.auth.token || readTokenFromCookieHeader(socket.handshake.headers.cookie);
     if (!token) return next(new Error('Authentication error'));
 
     try {

@@ -41,12 +41,19 @@ export function hasExpectedFileSignature(filePath: string, mimeType: string) {
   const buffer = fs.readFileSync(filePath);
   if (buffer.length < 4) return false;
 
+  const hasMp4Signature = () => {
+    if (buffer.length < 12) return false;
+    const firstBoxSize = buffer.readUInt32BE(0);
+    const firstBoxType = buffer.subarray(4, 8).toString('ascii');
+    return firstBoxSize >= 8 && ['ftyp', 'styp', 'moov', 'moof'].includes(firstBoxType);
+  };
+
   if (mime === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
   if (mime === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   if (mime === 'image/gif') return buffer.subarray(0, 3).toString('ascii') === 'GIF';
   if (mime === 'image/webp') return buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
   if (mime === 'video/webm' || mime === 'audio/webm') return buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
-  if (mime === 'video/mp4' || mime === 'video/quicktime' || mime === 'audio/mp4' || mime === 'audio/x-m4a') return buffer.subarray(4, 8).toString('ascii') === 'ftyp';
+  if (mime === 'video/mp4' || mime === 'video/quicktime' || mime === 'audio/mp4' || mime === 'audio/x-m4a') return hasMp4Signature();
   if (mime === 'audio/ogg') return buffer.subarray(0, 4).toString('ascii') === 'OggS';
   if (mime === 'audio/mpeg') return buffer.subarray(0, 3).toString('ascii') === 'ID3' || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0);
   if (mime === 'application/pdf') return buffer.subarray(0, 4).toString('ascii') === '%PDF';

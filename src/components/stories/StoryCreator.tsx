@@ -4,6 +4,8 @@ import { useChatStore } from '../../store/useChatStore';
 import { socket } from '../../socket/client';
 import { notifyApp } from '../../utils/notifications';
 import { resolveApiUrl } from '../../utils/api';
+import { compressImageForUpload } from '../../utils/mediaOptimization';
+import { withAuthHeader } from '../../utils/session';
 
 export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void }> = ({ onClose, onCreated }) => {
   const { user } = useChatStore();
@@ -32,14 +34,14 @@ export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void
     setIsUploading(true);
 
     try {
+      const uploadFile = await compressImageForUpload(file);
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', uploadFile, file.name);
 
-      const token = localStorage.getItem('nexa_token');
       // Upload media
       const upRes = await fetch(resolveApiUrl('/api/upload'), {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: withAuthHeader(),
         body: formData,
       });
 
@@ -49,10 +51,7 @@ export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void
       // Create story
       const createRes = await fetch(resolveApiUrl('/api/stories'), {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
-        },
+        headers: withAuthHeader({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           mediaUrl: url,
           mediaType: currentType,

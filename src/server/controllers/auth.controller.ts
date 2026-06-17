@@ -3,6 +3,7 @@ import { authService } from '../services/auth.service';
 import { googleAuthSchema, loginSchema, registerSchema } from '../validations/auth.schema';
 import { z } from 'zod';
 import { INVALID_RUSSIAN_PHONE_MESSAGE } from '../utils/phone';
+import { setAuthCookie } from '../utils/sessionCookie';
 
 const duplicateMessage = (err: any) => {
   if (err?.code !== 'P2002') return null;
@@ -20,17 +21,21 @@ const validationError = (err: z.ZodError) => ({
 });
 
 const isKnownRegistrationError = (message?: string) => [
-  'Пользователь с такой почтой уже существует',
   'Этот никнейм уже занят',
-  'Этот номер телефона уже привязан к другому аккаунту',
   INVALID_RUSSIAN_PHONE_MESSAGE,
-].includes(message || '');
+].includes(message || '') || Boolean(message && (
+  message.startsWith('Эта почта уже привязана к аккаунту @') ||
+  message.startsWith('Этот номер телефона уже привязан к аккаунту @') ||
+  message === 'Пользователь с такой почтой уже существует' ||
+  message === 'Этот номер телефона уже привязан к другому аккаунту'
+));
 
 export const authController = {
   register: async (req: Request, res: Response): Promise<void> => {
     try {
       const data = registerSchema.parse(req.body);
       const result = await authService.register(data);
+      setAuthCookie(res, result.token);
       res.json(result);
     } catch (err: any) {
       if (err instanceof z.ZodError) {
@@ -55,6 +60,7 @@ export const authController = {
     try {
       const data = loginSchema.parse(req.body);
       const result = await authService.login(data);
+      setAuthCookie(res, result.token);
       res.json(result);
     } catch (err: any) {
       if (err instanceof z.ZodError) {
@@ -69,6 +75,7 @@ export const authController = {
     try {
       const data = googleAuthSchema.parse(req.body);
       const result = await authService.googleLogin(data);
+      setAuthCookie(res, result.token);
       res.json(result);
     } catch (err: any) {
       if (err instanceof z.ZodError) {

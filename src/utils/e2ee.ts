@@ -1,5 +1,35 @@
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
+import { openDB, DBSchema } from 'idb';
+
+export type LocalPrivateKey = string | CryptoKey;
+
+interface NexaE2EEKeyDB extends DBSchema {
+  privateKeys: {
+    key: string;
+    value: {
+      id: string;
+      key: LocalPrivateKey;
+      format: 'webcrypto' | 'base64';
+      updatedAt: number;
+    };
+  };
+}
+
+const PRIVATE_KEY_ID = 'default';
+const LEGACY_PRIVATE_KEY_STORAGE_KEY = 'nexa_private_key';
+
+let privateKeyCache: LocalPrivateKey | null = null;
+let hydratePrivateKeyPromise: Promise<LocalPrivateKey | null> | null = null;
+
+const getKeyDB = () =>
+  openDB<NexaE2EEKeyDB>('nexa-e2ee-keys', 1, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains('privateKeys')) {
+        db.createObjectStore('privateKeys', { keyPath: 'id' });
+      }
+    },
+  });
 
 // Helper to convert Uint8Array to Base64
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -37,7 +67,7 @@ async function importPublicKey(publicKeyBase64: string): Promise<CryptoKey> {
   );
 }
 
-async function importPrivateKey(privateKeyBase64: string): Promise<CryptoKey> {
+async function importPrivateKey(privateKeyBase64: string, extractable = false): Promise<CryptoKey> {
   const binaryDer = base64ToArrayBuffer(privateKeyBase64);
   return await window.crypto.subtle.importKey(
     "pkcs8",
@@ -46,10 +76,41 @@ async function importPrivateKey(privateKeyBase64: string): Promise<CryptoKey> {
       name: "ECDH",
       namedCurve: "P-256"
     },
-    true,
+    extractable,
     ["deriveKey", "deriveBits"]
   );
 }
+
+const isModernPrivateKey = (key: string) => key.length > 60;
+
+const persistPrivateKey = async (key: LocalPrivateKey) => {
+  try {
+    const db = await getKeyDB();
+    let storedKey = key;
+    let format: 'webcrypto' | 'base64' = typeof key === 'string' ? 'base64' : 'webcrypto';
+
+    if (typeof key === 'string' && isModernPrivateKey(key)) {
+      storedKey = await importPrivateKey(key, false);
+      privateKeyCache = storedKey;
+      format = 'webcrypto';
+    }
+
+    await db.put('privateKeys', {
+      id: PRIVATE_KEY_ID,
+      key: storedKey,
+      format,
+      updatedAt: Date.now(),
+    });
+  } catch (error) {
+    console.warn('[E2EE] Failed to persist private key:', error);
+  } finally {
+    try {
+      localStorage.removeItem(LEGACY_PRIVATE_KEY_STORAGE_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+};
 
 export const generateKeyPair = async () => {
   try {
@@ -84,12 +145,14 @@ export const generateKeyPair = async () => {
 export const encryptMessage = async (
   message: string, 
   recipientPublicKeyBase64: string, 
-  senderPrivateKeyBase64: string
+  senderPrivateKey: LocalPrivateKey
 ): Promise<string> => {
   if (!message) return '';
   try {
-    if (recipientPublicKeyBase64.length > 60 && senderPrivateKeyBase64.length > 60) {
-      const senderPrivKey = await importPrivateKey(senderPrivateKeyBase64);
+    if (recipientPublicKeyBase64.length > 60 && (typeof senderPrivateKey !== 'string' || isModernPrivateKey(senderPrivateKey))) {
+      const senderPrivKey = typeof senderPrivateKey === 'string'
+        ? await importPrivateKey(senderPrivateKey)
+        : senderPrivateKey;
       const recipientPubKey = await importPublicKey(recipientPublicKeyBase64);
       
       const symmetricKey = await window.crypto.subtle.deriveKey(
@@ -130,13 +193,16 @@ export const encryptMessage = async (
 
   // Fallback to TweetNaCl box
   try {
+    if (typeof senderPrivateKey !== 'string') {
+      throw new Error('NaCl fallback requires a raw private key');
+    }
     const recipientPublicKey = naclUtil.decodeBase64(recipientPublicKeyBase64);
-    const senderPrivateKey = naclUtil.decodeBase64(senderPrivateKeyBase64);
+    const senderPrivateKeyBytes = naclUtil.decodeBase64(senderPrivateKey);
     
     const nonce = nacl.randomBytes(nacl.box.nonceLength);
     const messageUint8 = naclUtil.decodeUTF8(message);
     
-    const encrypted = nacl.box(messageUint8, nonce, recipientPublicKey, senderPrivateKey);
+    const encrypted = nacl.box(messageUint8, nonce, recipientPublicKey, senderPrivateKeyBytes);
     
     const fullMessage = new Uint8Array(nonce.length + encrypted.length);
     fullMessage.set(nonce);
@@ -152,14 +218,16 @@ export const encryptMessage = async (
 export const decryptMessage = async (
   encryptedMessageBase64: string, 
   senderPublicKeyBase64: string, 
-  recipientPrivateKeyBase64: string
+  recipientPrivateKey: LocalPrivateKey
 ): Promise<string> => {
   if (!encryptedMessageBase64) return '';
 
   if (encryptedMessageBase64.startsWith("aes-gcm:")) {
     const cleanBase64 = encryptedMessageBase64.replace("aes-gcm:", "");
     try {
-      const recipientPrivKey = await importPrivateKey(recipientPrivateKeyBase64);
+      const recipientPrivKey = typeof recipientPrivateKey === 'string'
+        ? await importPrivateKey(recipientPrivateKey)
+        : recipientPrivateKey;
       const senderPubKey = await importPublicKey(senderPublicKeyBase64);
       
       const symmetricKey = await window.crypto.subtle.deriveKey(
@@ -193,14 +261,17 @@ export const decryptMessage = async (
     } catch (e) {
       console.error("AES-GCM decryption failed:", e);
       try {
+        if (typeof recipientPrivateKey !== 'string') {
+          throw new Error('NaCl fallback requires a raw private key');
+        }
         const encryptedMessage = naclUtil.decodeBase64(cleanBase64);
         const senderPublicKey = naclUtil.decodeBase64(senderPublicKeyBase64);
-        const recipientPrivateKey = naclUtil.decodeBase64(recipientPrivateKeyBase64);
+        const recipientPrivateKeyBytes = naclUtil.decodeBase64(recipientPrivateKey);
 
         const nonce = encryptedMessage.slice(0, nacl.box.nonceLength);
         const message = encryptedMessage.slice(nacl.box.nonceLength);
 
-        const decrypted = nacl.box.open(message, nonce, senderPublicKey, recipientPrivateKey);
+        const decrypted = nacl.box.open(message, nonce, senderPublicKey, recipientPrivateKeyBytes);
         if (decrypted) {
           return naclUtil.encodeUTF8(decrypted);
         }
@@ -217,14 +288,17 @@ export const decryptMessage = async (
     : encryptedMessageBase64;
 
   try {
+    if (typeof recipientPrivateKey !== 'string') {
+      throw new Error('NaCl payload requires a raw private key');
+    }
     const encryptedMessage = naclUtil.decodeBase64(actualMsgText);
     const senderPublicKey = naclUtil.decodeBase64(senderPublicKeyBase64);
-    const recipientPrivateKey = naclUtil.decodeBase64(recipientPrivateKeyBase64);
+    const recipientPrivateKeyBytes = naclUtil.decodeBase64(recipientPrivateKey);
     
     const nonce = encryptedMessage.slice(0, nacl.box.nonceLength);
     const message = encryptedMessage.slice(nacl.box.nonceLength);
     
-    const decrypted = nacl.box.open(message, nonce, senderPublicKey, recipientPrivateKey);
+    const decrypted = nacl.box.open(message, nonce, senderPublicKey, recipientPrivateKeyBytes);
     
     if (!decrypted) return '[Старое сообщение недоступно]';
     return naclUtil.encodeUTF8(decrypted);
@@ -235,9 +309,73 @@ export const decryptMessage = async (
 };
 
 export const getLocalPrivateKey = () => {
-  return localStorage.getItem('nexa_private_key');
+  return privateKeyCache;
 };
 
-export const saveLocalPrivateKey = (key: string) => {
-  localStorage.setItem('nexa_private_key', key);
+export const getLocalPrivateKeyAsync = async () => {
+  if (privateKeyCache) return privateKeyCache;
+  return hydrateLocalPrivateKey();
+};
+
+export const saveLocalPrivateKey = (key: LocalPrivateKey) => {
+  privateKeyCache = key;
+  void persistPrivateKey(key);
+};
+
+export const hydrateLocalPrivateKey = async () => {
+  if (privateKeyCache) return privateKeyCache;
+  if (hydratePrivateKeyPromise) return hydratePrivateKeyPromise;
+
+  hydratePrivateKeyPromise = (async () => {
+    try {
+      const db = await getKeyDB();
+      const stored = await db.get('privateKeys', PRIVATE_KEY_ID);
+      if (stored?.key) {
+        privateKeyCache = stored.key;
+        try {
+          localStorage.removeItem(LEGACY_PRIVATE_KEY_STORAGE_KEY);
+        } catch {
+          // Ignore storage failures.
+        }
+        return privateKeyCache;
+      }
+    } catch (error) {
+      console.warn('[E2EE] Failed to read private key from IndexedDB:', error);
+    }
+
+    try {
+      const legacyKey = localStorage.getItem(LEGACY_PRIVATE_KEY_STORAGE_KEY);
+      if (legacyKey) {
+        privateKeyCache = legacyKey;
+        await persistPrivateKey(legacyKey);
+        return privateKeyCache;
+      }
+    } catch (error) {
+      console.warn('[E2EE] Failed to migrate legacy private key:', error);
+    }
+
+    return null;
+  })();
+
+  try {
+    return await hydratePrivateKeyPromise;
+  } finally {
+    hydratePrivateKeyPromise = null;
+  }
+};
+
+export const clearLocalPrivateKey = async () => {
+  privateKeyCache = null;
+  try {
+    localStorage.removeItem(LEGACY_PRIVATE_KEY_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+
+  try {
+    const db = await getKeyDB();
+    await db.delete('privateKeys', PRIVATE_KEY_ID);
+  } catch (error) {
+    console.warn('[E2EE] Failed to clear private key:', error);
+  }
 };

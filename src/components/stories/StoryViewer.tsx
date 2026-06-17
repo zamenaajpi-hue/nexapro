@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { getInitials } from '../../utils/helpers';
 import { socket } from '../../socket/client';
 import { resolveApiUrl } from '../../utils/api';
+import { withAuthHeader } from '../../utils/session';
 
 export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpdate: () => void }> = ({
   stories,
@@ -11,56 +12,45 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
   onUpdate,
 }) => {
   const { user } = useChatStore();
-  const initialIndex = stories.findIndex((story) => !story.views?.some((view: any) => view.userId === user?.id));
+  const orderedStories = useMemo(
+    () => [...stories].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+    [stories],
+  );
+  const initialIndex = orderedStories.findIndex((story) => !story.views?.some((view: any) => view.userId === user?.id));
   const [currentIndex, setCurrentIndex] = useState(initialIndex >= 0 ? initialIndex : 0);
   const [isPaused, setIsPaused] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [mediaReady, setMediaReady] = useState(false);
+  const [mediaFailed, setMediaFailed] = useState(false);
+  const [viewedStoryIds, setViewedStoryIds] = useState<Set<string>>(new Set());
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const DURATION = 5000;
-  const currentStory = stories[currentIndex];
+  const durationMs = 5000;
+  const currentStory = orderedStories[currentIndex];
   const isVideo = currentStory?.mediaType === 'video';
-
-  useEffect(() => {
-    if (currentStory && currentStory.userId !== user?.id) {
-      const hasViewed = currentStory.views?.some((view: any) => view.userId === user?.id);
-      if (!hasViewed) {
-        fetch(resolveApiUrl(`/api/stories/${currentStory.id}/view`), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${localStorage.getItem('nexa_token')}` },
-        })
-          .then(() => {
-            socket.emit('story:viewed', { storyId: currentStory.id, authorId: currentStory.userId });
-          })
-          .catch(console.error);
-
-        if (!currentStory.views) currentStory.views = [];
-        currentStory.views.push({ userId: user?.id });
-      }
-    }
-  }, [currentIndex, currentStory, user]);
+  const mediaSrc = currentStory?.mediaUrl ? resolveApiUrl(currentStory.mediaUrl) : '';
 
   useEffect(() => {
     setProgress(0);
-    let interval: ReturnType<typeof setInterval> | undefined;
+    setMediaReady(false);
+    setMediaFailed(false);
+  }, [currentStory?.id]);
 
-    if (!isPaused && !isVideo) {
-      const startTime = Date.now();
-      interval = setInterval(() => {
-        const elapsed = Date.now() - startTime;
-        const nextProgress = (elapsed / DURATION) * 100;
-        if (nextProgress >= 100) {
-          handleNext();
-        } else {
-          setProgress(nextProgress);
-        }
-      }, 50);
-    }
+  useEffect(() => {
+    if (!currentStory || currentStory.userId === user?.id || viewedStoryIds.has(currentStory.id)) return;
+    const hasViewed = currentStory.views?.some((view: any) => view.userId === user?.id);
+    if (hasViewed) return;
 
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [currentIndex, isPaused, isVideo]);
+    setViewedStoryIds((prev) => new Set(prev).add(currentStory.id));
+    fetch(resolveApiUrl(`/api/stories/${currentStory.id}/view`), {
+      method: 'POST',
+      headers: withAuthHeader(),
+    })
+      .then(() => {
+        socket.emit('story:viewed', { storyId: currentStory.id, authorId: currentStory.userId });
+      })
+      .catch(console.error);
+  }, [currentStory, user?.id, viewedStoryIds]);
 
   const closeViewer = () => {
     onUpdate();
@@ -68,8 +58,8 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
   };
 
   const handleNext = () => {
-    if (currentIndex < stories.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+    if (currentIndex < orderedStories.length - 1) {
+      setCurrentIndex((index) => index + 1);
     } else {
       closeViewer();
     }
@@ -77,11 +67,30 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
 
   const handlePrev = () => {
     if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
+      setCurrentIndex((index) => index - 1);
     } else {
       setProgress(0);
     }
   };
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    if (!currentStory || isPaused || isVideo || !mediaReady || mediaFailed) return undefined;
+
+    const startTime = Date.now();
+    interval = setInterval(() => {
+      const nextProgress = ((Date.now() - startTime) / durationMs) * 100;
+      if (nextProgress >= 100) {
+        handleNext();
+      } else {
+        setProgress(nextProgress);
+      }
+    }, 50);
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [currentStory?.id, isPaused, isVideo, mediaReady, mediaFailed]);
 
   const handleVideoTimeUpdate = () => {
     const video = videoRef.current;
@@ -91,14 +100,11 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
   };
 
   const handleReact = async (emoji: string) => {
-    if (currentStory.userId === user?.id) return;
+    if (!currentStory || currentStory.userId === user?.id) return;
     try {
       await fetch(resolveApiUrl(`/api/stories/${currentStory.id}/react`), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('nexa_token')}`,
-        },
+        headers: withAuthHeader({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ emoji }),
       });
       socket.emit('story:react', { storyId: currentStory.id, authorId: currentStory.userId, reaction: emoji });
@@ -113,7 +119,7 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
     <div className="story-viewer-overlay">
       <div className="story-viewer-shell">
         <div className="story-progress-row">
-          {stories.map((story, index) => (
+          {orderedStories.map((story, index) => (
             <div key={story.id} className="story-progress-track">
               <div
                 className="story-progress-fill"
@@ -158,15 +164,30 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
           {isVideo ? (
             <video
               ref={videoRef}
-              src={resolveApiUrl(currentStory.mediaUrl)}
+              src={mediaSrc}
               autoPlay
               playsInline
+              preload="metadata"
+              onLoadedMetadata={() => setMediaReady(true)}
               onTimeUpdate={handleVideoTimeUpdate}
               onEnded={handleNext}
+              onError={() => setMediaFailed(true)}
               className="story-media"
             />
           ) : (
-            <img src={resolveApiUrl(currentStory.mediaUrl)} alt="Story" className="story-media" />
+            <img
+              src={mediaSrc}
+              alt="Story"
+              loading="eager"
+              decoding="async"
+              onLoad={() => setMediaReady(true)}
+              onError={() => setMediaFailed(true)}
+              className="story-media"
+            />
+          )}
+
+          {mediaFailed && (
+            <div className="story-media-error">Не удалось загрузить историю</div>
           )}
 
           <button type="button" className="story-tap-zone story-tap-prev" onClick={handlePrev} aria-label="Previous story" />

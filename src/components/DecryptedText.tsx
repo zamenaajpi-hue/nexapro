@@ -1,10 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import * as e2ee from '../utils/e2ee';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface DecryptedTextProps {
   text: string;
@@ -16,7 +11,10 @@ interface DecryptedTextProps {
   plainTextFormat?: boolean;
 }
 
-const ENCRYPTED_PLACEHOLDER = '[Старое сообщение недоступно]';
+const MarkdownMessageContent = lazy(() => import('./MarkdownMessageContent'));
+const ENCRYPTED_PLACEHOLDER = '[Encrypted message unavailable]';
+const MARKDOWN_PATTERN =
+  /(^|\n)\s{0,3}(#{1,6}|\* |- |\d+\. |> )|```|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~/m;
 
 export const DecryptedText: React.FC<DecryptedTextProps> = ({
   text,
@@ -37,28 +35,28 @@ export const DecryptedText: React.FC<DecryptedTextProps> = ({
       setIsEncrypted(true);
 
       const run = async () => {
-        const privKey = e2ee.getLocalPrivateKey();
-
         try {
+          const e2ee = await import('../utils/e2ee');
+          const privKey = await e2ee.getLocalPrivateKeyAsync();
           const parsed = JSON.parse(text.replace('[E2EE]', ''));
 
           if (isOutgoing && privKey && userPublicKey) {
-            const dec = await e2ee.decryptMessage(parsed.s, userPublicKey, privKey);
+            const decryptedText = await e2ee.decryptMessage(parsed.s, userPublicKey, privKey);
             if (active) {
-              setDecrypted(dec || ENCRYPTED_PLACEHOLDER);
+              setDecrypted(decryptedText || ENCRYPTED_PLACEHOLDER);
             }
             return;
           }
 
           if (!isOutgoing && privKey && senderPublicKey) {
-            const dec = await e2ee.decryptMessage(parsed.r, senderPublicKey, privKey);
+            const decryptedText = await e2ee.decryptMessage(parsed.r, senderPublicKey, privKey);
             if (active) {
-              setDecrypted(dec || ENCRYPTED_PLACEHOLDER);
+              setDecrypted(decryptedText || ENCRYPTED_PLACEHOLDER);
             }
             return;
           }
-        } catch (e) {
-          console.warn('Decryption decode failed:', e);
+        } catch (error) {
+          console.warn('Decryption decode failed:', error);
         }
 
         if (active) {
@@ -66,7 +64,7 @@ export const DecryptedText: React.FC<DecryptedTextProps> = ({
         }
       };
 
-      run();
+      void run();
     } else {
       setIsEncrypted(false);
       setDecrypted(text);
@@ -77,51 +75,46 @@ export const DecryptedText: React.FC<DecryptedTextProps> = ({
     };
   }, [text, isGroupChat, isOutgoing, userPublicKey, senderPublicKey]);
 
+  const shouldRenderMarkdown = useMemo(() => {
+    if (plainTextFormat) return false;
+    return MARKDOWN_PATTERN.test(decrypted);
+  }, [decrypted, plainTextFormat]);
+
   const lockIcon = showLockIcon && isEncrypted ? (
     <span
-      title="Зашифровано"
+      title="Encrypted"
       style={{ display: 'inline-flex', alignSelf: plainTextFormat ? 'center' : 'flex-start' }}
     >
       <ShieldCheck size={14} style={{ color: '#34d399' }} />
     </span>
   ) : null;
 
-  return plainTextFormat ? (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-      {lockIcon}
-      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {decrypted}
+  if (plainTextFormat) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
+        {lockIcon}
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {decrypted}
+        </span>
       </span>
-    </span>
-  ) : (
+    );
+  }
+
+  const plainTextContent = (
+    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', width: '100%' }}>{decrypted}</div>
+  );
+
+  return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
       {lockIcon}
       <div style={{ wordBreak: 'break-word', width: '100%' }}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            code({ node, inline, className, children, ...props }: any) {
-              const match = /language-(\w+)/.exec(className || '');
-              return !inline && match ? (
-                <SyntaxHighlighter
-                  {...props}
-                  style={atomDark}
-                  language={match[1]}
-                  PreTag="div"
-                  className="rounded-md"
-                >
-                  {String(children).replace(/\n$/, '')}
-                </SyntaxHighlighter>
-              ) : (
-                <code {...props} className={`${className} bg-black/20 rounded px-1 py-0.5 text-sm`}>
-                  {children}
-                </code>
-              );
-            },
-          }}
-        >
-          {decrypted}
-        </ReactMarkdown>
+        {shouldRenderMarkdown ? (
+          <Suspense fallback={plainTextContent}>
+            <MarkdownMessageContent text={decrypted} />
+          </Suspense>
+        ) : (
+          plainTextContent
+        )}
       </div>
     </div>
   );

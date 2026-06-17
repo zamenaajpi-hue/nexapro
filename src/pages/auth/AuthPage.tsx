@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NexaLogo } from '../../shared/ui/NexaLogo';
 import { COLORS } from '../../shared/constants';
+import { isNativeAndroidApp } from '../../utils/platform';
 
 declare global {
   interface Window {
@@ -49,6 +50,7 @@ const normalizePhoneInput = (value: string) => {
 };
 
 export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loading, error }) => {
+  const allowGoogleAuth = !isNativeAndroidApp();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -61,6 +63,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
   const googleTokenClientRef = useRef<any>(null);
 
   useEffect(() => {
+    if (!allowGoogleAuth) return;
     if (googleClientId) return;
 
     let cancelled = false;
@@ -76,9 +79,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
     return () => {
       cancelled = true;
     };
-  }, [googleClientId]);
+  }, [allowGoogleAuth, googleClientId]);
 
   useEffect(() => {
+    if (!allowGoogleAuth) return;
     if (!googleClientId) return;
 
     let cancelled = false;
@@ -130,7 +134,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
       cancelled = true;
       script.removeEventListener('load', initializeGoogle);
     };
-  }, [googleClientId, onGoogleAuth, selectedColor]);
+  }, [allowGoogleAuth, googleClientId, onGoogleAuth, selectedColor]);
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -219,7 +223,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
             {loading ? 'Проверяем...' : authMode === 'login' ? 'Войти' : 'Создать аккаунт'}
           </button>
 
-          {googleClientId && (
+          {allowGoogleAuth && googleClientId && (
             <div className="google-auth-compact">
               <button
                 type="button"

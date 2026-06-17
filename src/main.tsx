@@ -33,12 +33,16 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App.tsx';
 import './index.css';
+import { isNativeAndroidApp, isNativeCapacitorApp } from './utils/platform';
 
 try {
   const rootElement = document.getElementById('root');
   if (!rootElement) {
     throw new Error('Root element with id="root" not found in DOM');
   }
+
+  document.documentElement.classList.toggle('platform-native', isNativeCapacitorApp());
+  document.documentElement.classList.toggle('platform-android', isNativeAndroidApp());
 
   createRoot(rootElement).render(
     <StrictMode>
@@ -52,8 +56,9 @@ try {
 }
 
 const isElectronRenderer = typeof window !== 'undefined' && Boolean((window as any).electron?.isElectron);
+const isNativeApp = typeof window !== 'undefined' && isNativeCapacitorApp();
 
-if ('serviceWorker' in navigator && !isElectronRenderer) {
+if ('serviceWorker' in navigator && !isElectronRenderer && !isNativeApp) {
   if (import.meta.env.PROD) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').catch(err => {
@@ -68,4 +73,12 @@ if ('serviceWorker' in navigator && !isElectronRenderer) {
       }
     });
   }
+}
+
+if ('serviceWorker' in navigator && isNativeApp) {
+  navigator.serviceWorker.getRegistrations().then(registrations => {
+    for (const registration of registrations) {
+      registration.unregister();
+    }
+  }).catch(() => {});
 }

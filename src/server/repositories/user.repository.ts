@@ -1,11 +1,32 @@
 import { db } from '../../services/db';
 
 export const userRepository = {
-  findByEmailOrNickname: async (email: string, nickname: string) => 
-    db.user.findFirst({ where: { OR: [{ email }, { nickname }] } }),
+  findByEmailOrNickname: async (email: string, nickname: string) => {
+    const [userByEmail, userByNickname] = await Promise.all([
+      userRepository.findByEmail(email),
+      userRepository.findByNickname(nickname),
+    ]);
 
-  findByEmail: async (email: string) => 
-    db.user.findUnique({ where: { email } }),
+    return userByEmail || userByNickname;
+  },
+
+  findByEmail: async (email: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const matches = await db.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "User"
+      WHERE "email" IS NOT NULL
+        AND lower("email") = ${normalizedEmail}
+      LIMIT 1
+    `;
+
+    if (!matches[0]?.id) return null;
+
+    return db.user.findUnique({ where: { id: matches[0].id } });
+  },
+
+  findByNickname: async (nickname: string) =>
+    db.user.findUnique({ where: { nickname } }),
 
   findByGoogleSub: async (googleSub: string) =>
     db.user.findUnique({ where: { googleSub } }),

@@ -7,22 +7,23 @@ async function main() {
   console.log('Seeding database...');
 
   const ownerEmail = process.env.NEXA_OWNER_EMAIL;
+  const normalizedOwnerEmail = ownerEmail?.trim().toLowerCase();
   const ownerPassword = process.env.NEXA_OWNER_PASSWORD;
   const ownerNickname = process.env.NEXA_OWNER_NICKNAME || 'OWNER';
 
-  if (ownerEmail && ownerPassword) {
+  if (normalizedOwnerEmail && ownerPassword) {
     const passwordHash = await bcrypt.hash(ownerPassword, 10);
     const owner = await prisma.user.upsert({
       where: { nickname: ownerNickname },
       update: {
-        email: ownerEmail,
+        email: normalizedOwnerEmail,
         role: 'owner',
         passwordHash,
         balance: 1000000,
       },
       create: {
         nickname: ownerNickname,
-        email: ownerEmail,
+        email: normalizedOwnerEmail,
         passwordHash,
         role: 'owner',
         avatarColor: '#FFD700',

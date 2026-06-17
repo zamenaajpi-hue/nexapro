@@ -65,6 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ setShowMenuDrawer, isMobileAct
     chats,
     allUsers,
     chatStates,
+    hiddenChats,
     channelPosts,
     updateChatState: updateChatStateInStore,
   } = useChatStore();
@@ -153,6 +154,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ setShowMenuDrawer, isMobileAct
         };
       })
       .filter(({ item, chatType, state, name, lastMessage }) => {
+        if (hiddenChats[item.id]) return false;
+
         const archived = state?.archived === true;
         if (activeFolder === 'archive') {
           if (!archived) return false;
@@ -183,7 +186,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ setShowMenuDrawer, isMobileAct
         if (!!a.state?.pinned !== !!b.state?.pinned) return a.state?.pinned ? -1 : 1;
         return b.activityTime - a.activityTime;
       });
-  }, [activeChat, activeFolder, channelPosts, channels, chatStates, chats, displayUsersList, groups, searchTerm, user]);
+  }, [activeChat, activeFolder, channelPosts, channels, chatStates, chats, displayUsersList, groups, hiddenChats, searchTerm, user]);
 
   if (!user) return null;
 

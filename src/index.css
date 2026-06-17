@@ -37,6 +37,18 @@ body {
     position: relative;
 }
 
+html.platform-android,
+html.platform-android body {
+    overscroll-behavior-y: contain;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html.platform-android body {
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+}
+
 body::before {
     content: "";
     position: fixed;
@@ -437,6 +449,13 @@ input, textarea {
     transition: var(--transition);
 }
 
+html.platform-android input,
+html.platform-android textarea,
+html.platform-android select,
+html.platform-android button {
+    font-size: 16px;
+}
+
 input:focus, textarea:focus {
     border-color: var(--accent-color);
     background-color: rgba(255, 255, 255, 0.05);
@@ -728,6 +747,22 @@ input:focus, textarea:focus {
     display: block;
     object-fit: contain;
     pointer-events: none;
+}
+
+.story-media-error {
+    position: absolute;
+    z-index: 19;
+    left: 18px;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.82);
+    color: #fff;
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.35;
 }
 
 .story-tap-zone {
@@ -1510,6 +1545,30 @@ input:focus, textarea:focus {
 
 .chat-actions button:hover {
     color: white;
+}
+
+.scroll-to-bottom-button {
+    position: absolute;
+    right: clamp(1rem, 3vw, 2rem);
+    bottom: calc(92px + env(safe-area-inset-bottom));
+    width: 46px;
+    height: 46px;
+    border: 1px solid rgba(0, 239, 255, 0.34);
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(0, 239, 255, 0.95), rgba(56, 189, 248, 0.86));
+    color: #06111f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 14px 34px rgba(0, 239, 255, 0.24);
+    cursor: pointer;
+    z-index: 15;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.scroll-to-bottom-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 40px rgba(0, 239, 255, 0.34);
 }
 
 .messages {
@@ -2837,6 +2896,13 @@ body.night-mode .message.outgoing {
         padding: 1rem;
     }
 
+    .scroll-to-bottom-button {
+        right: 1rem;
+        bottom: calc(82px + env(safe-area-inset-bottom));
+        width: 42px;
+        height: 42px;
+    }
+
     .message {
         max-width: calc(100% - 0.5rem);
     }
@@ -2920,6 +2986,62 @@ body.night-mode .message.outgoing {
     .back-btn {
         display: none !important;
     }
+}
+
+html.platform-android #login-screen {
+    padding:
+        max(18px, env(safe-area-inset-top))
+        max(14px, env(safe-area-inset-right))
+        max(18px, env(safe-area-inset-bottom))
+        max(14px, env(safe-area-inset-left));
+}
+
+html.platform-android .login-card {
+    max-width: min(480px, 100%);
+    padding: 1.6rem 1.2rem calc(1.6rem + env(safe-area-inset-bottom));
+    border-radius: 24px;
+}
+
+html.platform-android .chat-area {
+    min-height: 100svh;
+}
+
+html.platform-android .chat-header {
+    padding-top: max(0px, env(safe-area-inset-top));
+}
+
+html.platform-android .input-area {
+    padding: 0.95rem 1rem calc(0.95rem + env(safe-area-inset-bottom));
+}
+
+html.platform-android .input-wrapper {
+    gap: 0.85rem;
+    padding: 0.75rem 1rem;
+}
+
+html.platform-android .input-wrapper input {
+    font-size: 16px;
+}
+
+html.platform-android .btn-primary,
+html.platform-android .btn-secondary,
+html.platform-android .btn-google-icon,
+html.platform-android .send-btn,
+html.platform-android .voice-btn,
+html.platform-android .header-actions button,
+html.platform-android .bottom-nav-item {
+    min-height: 48px;
+}
+
+html.platform-android .send-btn,
+html.platform-android .voice-btn {
+    width: 48px !important;
+    height: 48px !important;
+}
+
+html.platform-android .bottom-nav {
+    height: calc(64px + env(safe-area-inset-bottom));
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
 /* Scrollbar */

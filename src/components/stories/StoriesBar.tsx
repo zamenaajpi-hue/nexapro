@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PlusCircle } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { getInitials } from '../../utils/helpers';
@@ -6,28 +6,40 @@ import { StoryCreator } from './StoryCreator';
 import { StoryViewer } from './StoryViewer';
 import { socket } from '../../socket/client';
 import { resolveApiUrl } from '../../utils/api';
+import { withAuthHeader } from '../../utils/session';
 
 export const StoriesBar: React.FC = () => {
   const { user } = useChatStore();
   const [activeStories, setActiveStories] = useState<any[]>([]);
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
   const [viewerStories, setViewerStories] = useState<any[] | null>(null);
-  
+
   useEffect(() => {
     fetchStories();
 
+    const handleViewUpdate = ({ storyId, viewerId }: any) => {
+      setActiveStories((stories) => stories.map((story) => {
+        if (story.id !== storyId) return story;
+        const views = Array.isArray(story.views) ? story.views : [];
+        if (views.some((view: any) => view.userId === viewerId)) return story;
+        return { ...story, views: [...views, { userId: viewerId }] };
+      }));
+    };
+
     socket.on('story:new', fetchStories);
+    socket.on('story:viewUpdate', handleViewUpdate);
+    socket.on('story:reactionAdded', fetchStories);
     return () => {
       socket.off('story:new', fetchStories);
+      socket.off('story:viewUpdate', handleViewUpdate);
+      socket.off('story:reactionAdded', fetchStories);
     };
   }, []);
 
   const fetchStories = async () => {
     try {
-      const token = localStorage.getItem("nexa_token");
-      if (!token) return;
       const res = await fetch(resolveApiUrl("/api/stories/active"), {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: withAuthHeader()
       });
       if (res.status === 401) {
         setActiveStories([]);
@@ -36,7 +48,6 @@ export const StoriesBar: React.FC = () => {
       }
       if (res.ok) {
         const data = await res.json();
-        // group by user
         setActiveStories(data);
       }
     } catch (e) {
@@ -44,8 +55,11 @@ export const StoriesBar: React.FC = () => {
     }
   };
 
+  if (!user) return null;
+
   // Group stories by userId
   const groupedStories = activeStories.reduce((acc: any, story: any) => {
+    if (!user) return acc;
     if (!acc[story.userId]) {
       acc[story.userId] = {
         user: story.user,
@@ -76,7 +90,7 @@ export const StoriesBar: React.FC = () => {
   const othersGroups: any[] = usersWithStories.filter((g: any) => g.user.id !== user.id);
 
   const openViewer = (group: any) => {
-    setViewerStories(group.stories);
+    setViewerStories([...group.stories].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
   };
 
   return (

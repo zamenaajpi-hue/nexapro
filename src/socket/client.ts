@@ -16,11 +16,25 @@ function getInitialSocketUrl(): string {
 export const socket: Socket = io(getInitialSocketUrl(), {
   transports: ["websocket", "polling"],
   reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
+  reconnectionDelayMax: 15000,
   reconnectionAttempts: Infinity,
-  timeout: 20000,
+  randomizationFactor: 0.5,
+  timeout: 30000,
+  upgrade: true,
   autoConnect: false, // Prevents aggressive connection attempts prior to server discovery on mobile
+  withCredentials: true,
 });
+
+// Mobile VPNs can rotate routes, tunnel DNS, or temporarily suspend WebSocket flows
+// while Android switches networks. Socket.IO polling fallback plus explicit online
+// reconnect keeps sync alive without requiring certificate pinning changes.
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (!socket.connected && socket.auth) {
+      socket.connect();
+    }
+  });
+}
 
 export const connectSocket = (token?: string) => {
   // Ensure the Socket URL is fresh in case it was updated
@@ -37,6 +51,8 @@ export const connectSocket = (token?: string) => {
         socket.disconnect().connect();
       }
     }
+  } else if (socket.auth && typeof socket.auth === 'object' && 'token' in socket.auth) {
+    socket.auth = {};
   }
   if (!socket.connected) {
     socket.connect();

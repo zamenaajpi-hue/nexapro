@@ -11,6 +11,8 @@ import { normalizeRussianPhone } from '../utils/phone';
 const getInitials = (name: string) =>
   name ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : '?';
 
+const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase() || '';
+
 const googleClient = new OAuth2Client();
 
 const createUniqueNexaId = async () => {
@@ -93,9 +95,16 @@ const verifyGoogleCredential = async (data: { credential?: string; accessToken?:
 
 export const authService = {
   register: async (data: any) => {
-    const existing = await userRepository.findByEmailOrNickname(data.email, data.nickname);
-    if (existing?.email === data.email) throw new Error('Пользователь с такой почтой уже существует');
-    if (existing?.nickname === data.nickname) throw new Error('Этот никнейм уже занят');
+    const email = normalizeEmail(data.email);
+    const [existingEmailUser, existingNicknameUser] = await Promise.all([
+      userRepository.findByEmail(email),
+      userRepository.findByNickname(data.nickname),
+    ]);
+
+    if (existingEmailUser) {
+      throw new Error(`Эта почта уже привязана к аккаунту @${existingEmailUser.nickname}`);
+    }
+    if (existingNicknameUser) throw new Error('Этот никнейм уже занят');
 
     const normalizedPhone = normalizeRussianPhone(data.phoneNumber);
     if (normalizedPhone) {
@@ -105,7 +114,7 @@ export const authService = {
 
     const passwordHash = await bcrypt.hash(data.password, 10);
     const user = await userRepository.create({
-      email: data.email,
+      email,
       phoneNumber: data.phoneNumber || null,
       normalizedPhone,
       nickname: data.nickname,
@@ -123,7 +132,7 @@ export const authService = {
   },
 
   login: async (data: any) => {
-    const user = await userRepository.findByEmail(data.email);
+    const user = await userRepository.findByEmail(normalizeEmail(data.email));
     if (!user || !user.passwordHash) throw new Error('Invalid credentials');
 
     const isValid = await bcrypt.compare(data.password, user.passwordHash);
@@ -134,7 +143,7 @@ export const authService = {
 
   googleLogin: async (data: any) => {
     const payload = await verifyGoogleCredential(data);
-    const email = payload.email!.toLowerCase();
+    const email = normalizeEmail(payload.email);
     const googleSub = payload.sub;
     if (!googleSub) throw new Error('Google sign-in failed');
 

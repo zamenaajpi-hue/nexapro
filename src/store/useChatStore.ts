@@ -1,8 +1,48 @@
 import { create } from 'zustand';
 import { User, Message, Group, Channel, ChannelPost, ChatStateRecord } from '../types/chat';
-import { saveMessageLocally, saveMessagesLocallyBatch } from './localDB';
+import { clearMessagesLocally, saveMessageLocally, saveMessagesLocallyBatch } from './localDB';
 
 const chatStateKey = (chatType: ChatStateRecord['chatType'], chatId: string) => `${chatType}:${chatId}`;
+const chatVisibilityStorageKey = (userId: string) => `nexa_chat_visibility:${userId}`;
+
+type ChatVisibilityState = {
+  hiddenChats: Record<string, true>;
+  chatClearedAt: Record<string, number>;
+};
+
+const emptyVisibilityState = (): ChatVisibilityState => ({
+  hiddenChats: {},
+  chatClearedAt: {},
+});
+
+const readChatVisibilityState = (userId?: string | null): ChatVisibilityState => {
+  if (!userId || typeof window === 'undefined') return emptyVisibilityState();
+
+  try {
+    const raw = localStorage.getItem(chatVisibilityStorageKey(userId));
+    if (!raw) return emptyVisibilityState();
+    const parsed = JSON.parse(raw);
+    return {
+      hiddenChats: parsed?.hiddenChats && typeof parsed.hiddenChats === 'object' ? parsed.hiddenChats : {},
+      chatClearedAt: parsed?.chatClearedAt && typeof parsed.chatClearedAt === 'object' ? parsed.chatClearedAt : {},
+    };
+  } catch {
+    return emptyVisibilityState();
+  }
+};
+
+const persistChatVisibilityState = (
+  userId: string | null | undefined,
+  visibility: ChatVisibilityState,
+) => {
+  if (!userId || typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem(chatVisibilityStorageKey(userId), JSON.stringify(visibility));
+  } catch {
+    // Local chat visibility is best-effort; the in-memory state still applies.
+  }
+};
 
 interface ChatStoreState {
   user: User | null;
@@ -14,6 +54,8 @@ interface ChatStoreState {
   chats: Record<string, { messages: Message[] }>;
   channelPosts: Record<string, ChannelPost[]>;
   chatStates: Record<string, ChatStateRecord>;
+  hiddenChats: Record<string, true>;
+  chatClearedAt: Record<string, number>;
   
   setUser: (user: User | null) => void;
   setOnlineUsers: (users: User[]) => void;
@@ -25,6 +67,9 @@ interface ChatStoreState {
   addMessage: (chatId: string, message: Message) => void;
   updateMessage: (chatId: string, message: Message) => void;
   deleteMessage: (chatId: string, messageId: string) => void;
+  clearChat: (chatId: string, chatType: ChatStateRecord['chatType']) => void;
+  hideChat: (chatId: string, chatType: ChatStateRecord['chatType']) => void;
+  unhideChat: (chatId: string) => void;
   setChatStates: (states: ChatStateRecord[]) => void;
   updateChatState: (state: ChatStateRecord) => void;
   updateGroup: (group: Group) => void;
@@ -47,8 +92,13 @@ export const useChatStore = create<ChatStoreState>((set) => ({
   chats: {},
   channelPosts: {},
   chatStates: {},
+  hiddenChats: {},
+  chatClearedAt: {},
 
-  setUser: (user) => set({ user }),
+  setUser: (user) => {
+    const visibility = readChatVisibilityState(user?.id);
+    set({ user, ...visibility });
+  },
   setOnlineUsers: (onlineUsers) => set({ onlineUsers }),
   setGroups: (groups) => set({ groups }),
   setChannels: (channels) => set({ channels }),
@@ -70,13 +120,17 @@ export const useChatStore = create<ChatStoreState>((set) => ({
     set((state) => {
       const existingMessages = state.chats[chatId]?.messages || [];
       if (existingMessages.find(m => m.id === message.id)) return state;
+      const hiddenChats = { ...state.hiddenChats };
+      delete hiddenChats[chatId];
 
       // Handle replacing optimistic messages (those starting with opt_)
       const optIndex = existingMessages.findIndex(m => m.id.startsWith('opt_') && m.text === message.text && m.fromId === message.fromId);
       if (optIndex >= 0) {
          const newMessages = [...existingMessages];
          newMessages[optIndex] = message;
+         persistChatVisibilityState(state.user?.id, { hiddenChats, chatClearedAt: state.chatClearedAt });
          return {
+           hiddenChats,
            chats: {
              ...state.chats,
              [chatId]: { messages: newMessages }
@@ -84,7 +138,9 @@ export const useChatStore = create<ChatStoreState>((set) => ({
          };
       }
 
+      persistChatVisibilityState(state.user?.id, { hiddenChats, chatClearedAt: state.chatClearedAt });
       return {
+        hiddenChats,
         chats: {
           ...state.chats,
           [chatId]: {
@@ -121,6 +177,79 @@ export const useChatStore = create<ChatStoreState>((set) => ({
           }
         }
       };
+    });
+  },
+
+  clearChat: (chatId, chatType) => {
+    clearMessagesLocally(chatId);
+    set((state) => {
+      const clearedAt = Date.now();
+      const chatClearedAt = { ...state.chatClearedAt, [chatId]: clearedAt };
+      const chatStates = { ...state.chatStates };
+      const stateKey = chatStateKey(chatType, chatId);
+      const existing = chatStates[stateKey];
+      if (state.user) {
+        chatStates[stateKey] = {
+          id: existing?.id || `local-${chatType}-${chatId}`,
+          userId: state.user.id,
+          chatId,
+          chatType,
+          unread: 0,
+          pinned: existing?.pinned ?? false,
+          archived: existing?.archived ?? false,
+          mutedUntil: existing?.mutedUntil ?? null,
+          lastReadAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      persistChatVisibilityState(state.user?.id, { hiddenChats: state.hiddenChats, chatClearedAt });
+      return {
+        chatClearedAt,
+        chatStates,
+        chats: {
+          ...state.chats,
+          [chatId]: { messages: [] },
+        },
+        channelPosts: {
+          ...state.channelPosts,
+          [chatId]: [],
+        },
+      };
+    });
+  },
+
+  hideChat: (chatId, chatType) => {
+    clearMessagesLocally(chatId);
+    set((state) => {
+      const hiddenChats = { ...state.hiddenChats, [chatId]: true as const };
+      const chatClearedAt = { ...state.chatClearedAt, [chatId]: Date.now() };
+      const chats = { ...state.chats };
+      const channelPosts = { ...state.channelPosts };
+      const chatStates = { ...state.chatStates };
+      delete chats[chatId];
+      delete channelPosts[chatId];
+      delete chatStates[chatStateKey(chatType, chatId)];
+
+      persistChatVisibilityState(state.user?.id, { hiddenChats, chatClearedAt });
+      return {
+        hiddenChats,
+        chatClearedAt,
+        chatStates,
+        chats,
+        channelPosts,
+        activeChat: state.activeChat === chatId ? null : state.activeChat,
+      };
+    });
+  },
+
+  unhideChat: (chatId) => {
+    set((state) => {
+      if (!state.hiddenChats[chatId]) return state;
+      const hiddenChats = { ...state.hiddenChats };
+      delete hiddenChats[chatId];
+      persistChatVisibilityState(state.user?.id, { hiddenChats, chatClearedAt: state.chatClearedAt });
+      return { hiddenChats };
     });
   },
 
@@ -190,7 +319,11 @@ export const useChatStore = create<ChatStoreState>((set) => ({
   addChannelPost: (channelId, post) => set((state) => {
     const existing = state.channelPosts[channelId] || [];
     if (existing.find(p => p.id === post.id)) return state;
+    const hiddenChats = { ...state.hiddenChats };
+    delete hiddenChats[channelId];
+    persistChatVisibilityState(state.user?.id, { hiddenChats, chatClearedAt: state.chatClearedAt });
     return {
+      hiddenChats,
       channelPosts: {
         ...state.channelPosts,
         [channelId]: [post, ...existing].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())

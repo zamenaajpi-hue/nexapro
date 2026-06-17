@@ -2,9 +2,9 @@ import React, { lazy, Suspense, useCallback, useState, useEffect, useRef } from 
 import { socket, connectSocket } from "./socket/client";
 import { useChatStore } from "./store/useChatStore";
 import { User, Message, Group, Channel, GroupCallParticipant } from "./types/chat";
-import * as e2ee from "./utils/e2ee";
 import { callSounds } from "./utils/callSounds";
 import {
+  ArrowDown,
   Send,
   Paperclip,
   Mic,
@@ -19,7 +19,6 @@ import {
   PhoneOff,
   Check,
   Shield,
-  Trash2,
   Wallet,
   Bookmark,
   Users,
@@ -45,7 +44,17 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import SoundUtility from "./utils/sound";
 import { DecryptedText } from "./components/DecryptedText";
 import { resolveApiUrl } from "./utils/api";
-import { enablePushNotifications, disablePushNotifications } from "./utils/pushNotifications";
+import { isNativeCapacitorApp } from "./utils/platform";
+import { ensureNativeMediaPermissions } from "./utils/nativePermissions";
+import { compressImageForUpload } from "./utils/mediaOptimization";
+import {
+  clearAuthSession,
+  getAuthToken,
+  getStoredUser,
+  migrateLegacyAuthStorage,
+  storeAuthSession,
+  updateStoredUser,
+} from "./utils/session";
 import type { ChannelPost } from "./types/chat";
 import type { NotificationType } from "./utils/notifications";
 
@@ -80,13 +89,39 @@ const isMobileContactsDevice = () => {
 
 const inviteText = "Привет! Я пользуюсь NEXA Messenger. Присоединяйся: ";
 
+const fetchWithRetry = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const method = (init?.method || "GET").toUpperCase();
+  const canRetry = ["GET", "HEAD", "OPTIONS"].includes(method) && !init?.body;
+  const attempts = canRetry ? 3 : 1;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = !init?.signal ? new AbortController() : null;
+    const timeoutId = controller ? window.setTimeout(() => controller.abort(), 30000) : null;
+
+    try {
+      return await window.fetch(input, {
+        ...init,
+        signal: init?.signal || controller?.signal,
+      });
+    } catch (error) {
+      if (!canRetry || attempt === attempts) throw error;
+      // VPN tunnels can pause DNS/WebSocket routes during handoff; short backoff keeps sync from failing hard.
+      await new Promise((resolve) => window.setTimeout(resolve, 350 * attempt));
+    } finally {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    }
+  }
+
+  return window.fetch(input, init);
+};
+
 // Safe wrapper around global fetch to transparently support relative calls to an external host on mobile/Capacitor
 const apiFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> => {
   const token =
-    typeof window !== "undefined" ? localStorage.getItem("nexa_token") : null;
+    typeof window !== "undefined" ? getAuthToken() : null;
   const withAuth = (requestInit?: RequestInit): RequestInit | undefined => {
     if (!token) return requestInit;
     const headers = new Headers(requestInit?.headers);
@@ -102,7 +137,7 @@ const apiFetch = (
     !input.startsWith("//")
   ) {
     const resolvedUrl = resolveApiUrl(input);
-    return window.fetch(resolvedUrl, withAuth(init)).then((response) => {
+    return fetchWithRetry(resolvedUrl, withAuth(init)).then((response) => {
       if (
         response.status === 401 &&
         !input.startsWith("/api/auth/") &&
@@ -114,7 +149,7 @@ const apiFetch = (
       return response;
     });
   }
-  return window.fetch(input, withAuth(init)).then((response) => {
+  return fetchWithRetry(input, withAuth(init)).then((response) => {
     const inputText = typeof input === "string" ? input : input.toString();
     if (
       response.status === 401 &&
@@ -242,6 +277,7 @@ const App: React.FC = () => {
     activeChat,
     setActiveChat,
     chats,
+    chatClearedAt,
     setMessages,
     addMessage,
     updateMessage,
@@ -434,6 +470,7 @@ const App: React.FC = () => {
   const [isVideoRecording, setIsVideoRecording] = useState(false);
   const [videoRecordingDuration, setVideoRecordingDuration] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const videoRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -727,6 +764,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     activeChatRef.current = activeChat;
+    setShowScrollToBottom(false);
   }, [activeChat]);
 
   useEffect(() => {
@@ -770,8 +808,9 @@ const App: React.FC = () => {
     options?: { textOverride?: string },
   ) => {
     try {
+      const uploadBlob = await compressImageForUpload(file, originalName);
       const formData = new FormData();
-      formData.append("file", file, originalName);
+      formData.append("file", uploadBlob, originalName);
 
       const res = await fetch(resolveApiUrl("/api/upload"), {
         method: "POST",
@@ -860,6 +899,7 @@ const App: React.FC = () => {
 
   const startRecording = async () => {
     try {
+      await ensureNativeMediaPermissions({ audio: true });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = pickSupportedMime([
         "audio/webm;codecs=opus",
@@ -901,6 +941,7 @@ const App: React.FC = () => {
 
   const startVideoNoteRecording = async () => {
     try {
+      await ensureNativeMediaPermissions({ audio: true, video: true });
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: { facingMode: "user" },
@@ -1063,6 +1104,7 @@ const App: React.FC = () => {
         audio: true,
         video: type === "video",
       };
+      await ensureNativeMediaPermissions({ audio: true, video: type === "video" });
       
       // Check for Electron context
       let stream: MediaStream;
@@ -1131,6 +1173,7 @@ const App: React.FC = () => {
       cleanupCall();
 
       const type = callState.type || "audio";
+      await ensureNativeMediaPermissions({ audio: true, video: type === "video" });
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: type === "video",
@@ -1210,6 +1253,7 @@ const App: React.FC = () => {
         }
       }
 
+      await ensureNativeMediaPermissions({ audio: true });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       groupCallStreamRef.current = stream;
       socket.emit("group-call:join", { groupId });
@@ -1292,22 +1336,35 @@ const App: React.FC = () => {
   }, [groupCall.status]);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem("nexa_token");
-    const savedUser = localStorage.getItem("nexa_user");
+    let cancelled = false;
 
-    if (savedToken && savedUser) {
-      setUser(JSON.parse(savedUser));
-      connectSocket(savedToken);
-    }
+    const restoreSession = async () => {
+      const { token: savedToken, user: savedUser } = await migrateLegacyAuthStorage();
+
+      void import("./utils/e2ee").then((e2ee) => e2ee.hydrateLocalPrivateKey());
+
+      if (cancelled || !savedUser) return;
+      void import("./store/localDB").then((db) => db.setLocalDBUser(savedUser.id));
+      setUser(savedUser);
+      connectSocket(savedToken || undefined);
+    };
+
+    void restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("nexa_token");
+    const token = getAuthToken();
     if (!user || !token) return;
 
-    enablePushNotifications(token).catch((error) => {
-      console.warn("[PUSH] Failed to enable notifications:", error);
-    });
+    void import("./utils/pushNotifications")
+      .then(({ enablePushNotifications }) => enablePushNotifications(token))
+      .catch((error) => {
+        console.warn("[PUSH] Failed to enable notifications:", error);
+      });
   }, [user?.id]);
 
   const [isConnected, setIsConnected] = useState(socket.connected);
@@ -1316,10 +1373,10 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user) return;
     const healE2EE = async () => {
-      const privKey = localStorage.getItem("nexa_private_key");
+      const e2ee = await import("./utils/e2ee");
+      const privKey = await e2ee.getLocalPrivateKeyAsync();
       if (!privKey || !user.publicKey) {
         try {
-          const e2ee = await import("./utils/e2ee");
           const keyPair = await e2ee.generateKeyPair();
           e2ee.saveLocalPrivateKey(keyPair.privateKey);
 
@@ -1338,17 +1395,18 @@ const App: React.FC = () => {
     const handleConnect = async () => {
       setIsConnected(true);
       socket.emit("join");
-      // process offline queue
+      // VPN and weak mobile networks often flap long-lived WebSocket tunnels.
+      // Keep the queue local until a fresh connection exists, then replay once.
       try {
         const localDB = await import("./store/localDB");
         const queue = await localDB.getSyncQueue();
         if (queue.length > 0) {
-          queue.forEach(async (q) => {
+          for (const q of queue) {
             if (q.type === "message:send") {
               socket.emit("message:send", q.payload);
             }
             await localDB.clearSyncAction(q.id);
-          });
+          }
         }
       } catch (e) {
         console.error("Offline sync failed", e);
@@ -1434,7 +1492,13 @@ const App: React.FC = () => {
       state.setChannelPosts(channelId, updated);
     });
 
+    const isRelevantMessage = (msg: Message) => {
+      if (msg.toGroupId) return true;
+      return msg.fromId === user.id || msg.toUserId === user.id;
+    };
+
     socket.on("message:new", (msg: Message) => {
+      if (!isRelevantMessage(msg)) return;
       const chatKey =
         msg.toGroupId || (msg.fromId === user.id ? msg.toUserId : msg.fromId);
       if (msg.fromId === user.id) {
@@ -1447,6 +1511,7 @@ const App: React.FC = () => {
     });
 
     socket.on("message:updated", (msg: Message) => {
+      if (!isRelevantMessage(msg)) return;
       const chatKey =
         msg.toGroupId || (msg.fromId === user.id ? msg.toUserId : msg.fromId);
       if (chatKey) updateMessage(chatKey, msg);
@@ -1483,11 +1548,12 @@ const App: React.FC = () => {
     });
 
     socket.on("message:history:result", ({ chatId, messages }) => {
-      messages.forEach((msg: Message) => {
+      const visibleMessages = messages.filter(isRelevantMessage);
+      visibleMessages.forEach((msg: Message) => {
         if (msg.fromId === user.id && msg.status !== "read")
           msg.status = "sent";
       });
-      setMessages(chatId, messages);
+      setMessages(chatId, visibleMessages);
     });
 
     socket.on("message:edit:error", ({ error }) => {
@@ -1509,7 +1575,7 @@ const App: React.FC = () => {
     socket.on("profile:updated", (updatedUser: User) => {
       if (user && updatedUser.id === user.id) {
         setUser(updatedUser);
-        localStorage.setItem("nexa_user", JSON.stringify(updatedUser));
+        updateStoredUser(updatedUser);
       }
     });
 
@@ -1918,11 +1984,19 @@ const App: React.FC = () => {
   // Removed messagesEndRef logic since we use virtualizer
 
   const applyAuthSession = (data: { token: string; user: User }) => {
-    localStorage.setItem("nexa_token", data.token);
-    localStorage.setItem("nexa_user", JSON.stringify(data.user));
+    const previousUserId = getStoredUser()?.id || null;
+
+    storeAuthSession(data);
     sessionExpiredDispatched = false;
     setSessionMessage(null);
 
+    void import("./store/localDB").then(async (db) => {
+      if (previousUserId && previousUserId !== data.user.id) {
+        await db.clearLocalUserData(previousUserId);
+      }
+      db.setLocalDBUser(data.user.id);
+    });
+    useChatStore.setState({ chats: {}, channelPosts: {}, chatStates: {}, activeChat: null });
     setUser(data.user);
     connectSocket(data.token);
   };
@@ -2007,17 +2081,26 @@ const App: React.FC = () => {
   };
 
   const handleLogout = (reason?: string) => {
-    const token = localStorage.getItem("nexa_token");
+    const token = getAuthToken();
+    const userId = user?.id;
     if (token) {
-      void disablePushNotifications(token).catch((error) => {
-        console.warn("[PUSH] Failed to disable notifications:", error);
+      void import("./utils/pushNotifications")
+        .then(({ disablePushNotifications }) => disablePushNotifications(token))
+        .catch((error) => {
+          console.warn("[PUSH] Failed to disable notifications:", error);
+        });
+    }
+    if (userId) {
+      void import("./store/localDB").then(async (db) => {
+        await db.clearLocalUserData(userId);
+        db.setLocalDBUser(null);
       });
     }
-    localStorage.removeItem("nexa_token");
-    localStorage.removeItem("nexa_user");
+    clearAuthSession();
     sessionExpiredDispatched = false;
     if (reason) setSessionMessage(reason);
     setUser(null);
+    useChatStore.setState({ chats: {}, channelPosts: {}, chatStates: {}, activeChat: null });
     socket.disconnect();
   };
 
@@ -2077,7 +2160,7 @@ const App: React.FC = () => {
 
     if (E2EE_ENABLED && recipient && recipient.publicKey && user?.publicKey) {
       const PrivKeyE2EE = await import("./utils/e2ee");
-      const privKey = PrivKeyE2EE.getLocalPrivateKey();
+      const privKey = await PrivKeyE2EE.getLocalPrivateKeyAsync();
       if (privKey) {
         const forRecipient = await PrivKeyE2EE.encryptMessage(
           messageText,
@@ -2248,9 +2331,10 @@ const App: React.FC = () => {
     if (!msg.text?.startsWith("[E2EE]")) return msg.text || "";
 
     try {
+      const e2ee = await import("./utils/e2ee");
       const rawJSON = msg.text.replace("[E2EE]", "");
       const parsed = JSON.parse(rawJSON);
-      const privKey = e2ee.getLocalPrivateKey();
+      const privKey = await e2ee.getLocalPrivateKeyAsync();
       if (!privKey) return "[Зашифровано]";
 
       const isOutgoing = msg.fromId === user?.id;
@@ -2297,7 +2381,7 @@ const App: React.FC = () => {
         forwardingMessage.type === "text"
       ) {
         const PrivKeyE2EE = await import("./utils/e2ee");
-        const privKey = PrivKeyE2EE.getLocalPrivateKey();
+        const privKey = await PrivKeyE2EE.getLocalPrivateKeyAsync();
         if (privKey) {
           const forRecipient = await PrivKeyE2EE.encryptMessage(
             msgText,
@@ -2364,11 +2448,7 @@ const App: React.FC = () => {
     const fetchUsers = async () => {
       if (!user) return;
       try {
-        const token = localStorage.getItem("nexa_token");
-        if (!token) return;
-        const res = await fetch("/api/users", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch("/api/users");
         if (res.ok) {
           const data = await res.json();
           setAllUsers(data.filter((u: any) => u.id !== user.id));
@@ -2498,10 +2578,7 @@ const App: React.FC = () => {
 
   const fetchAdminStats = async () => {
     try {
-      const token = localStorage.getItem("nexa_token");
-      const res = await fetch("/api/admin/stats", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch("/api/admin/stats");
       if (res.ok) {
         const data = await res.json();
         setAdminStats(data);
@@ -2513,10 +2590,7 @@ const App: React.FC = () => {
 
   const fetchAdminUsers = async () => {
     try {
-      const token = localStorage.getItem("nexa_token");
-      const res = await fetch("/api/admin/users", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch("/api/admin/users");
       if (res.ok) {
         const data = await res.json();
         setAdminUsers(data);
@@ -2528,10 +2602,7 @@ const App: React.FC = () => {
 
   const fetchAdminGroups = async () => {
     try {
-      const token = localStorage.getItem("nexa_token");
-      const res = await fetch("/api/admin/groups", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch("/api/admin/groups");
       if (res.ok) {
         const data = await res.json();
         setAdminGroups(data);
@@ -2543,10 +2614,7 @@ const App: React.FC = () => {
 
   const fetchAdminMessages = async () => {
     try {
-      const token = localStorage.getItem("nexa_token");
-      const res = await fetch("/api/admin/messages", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch("/api/admin/messages");
       if (res.ok) {
         const data = await res.json();
         setAdminMessages(data);
@@ -2562,12 +2630,10 @@ const App: React.FC = () => {
   ) => {
     try {
       const newRole = currentRole === "admin" ? "user" : "admin";
-      const token = localStorage.getItem("nexa_token");
       const res = await fetch(`/api/admin/users/${targetUserId}/role`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ role: newRole }),
       });
@@ -2588,10 +2654,8 @@ const App: React.FC = () => {
     )
       return;
     try {
-      const token = localStorage.getItem("nexa_token");
       const res = await fetch(`/api/admin/users/${targetUserId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         fetchAdminUsers();
@@ -2613,10 +2677,8 @@ const App: React.FC = () => {
     )
       return;
     try {
-      const token = localStorage.getItem("nexa_token");
       const res = await fetch(`/api/admin/groups/${groupId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         fetchAdminGroups();
@@ -2630,10 +2692,8 @@ const App: React.FC = () => {
   const handleDeleteMessage = async (msgId: string) => {
     if (!confirm("Are you sure you want to delete this message?")) return;
     try {
-      const token = localStorage.getItem("nexa_token");
       const res = await fetch(`/api/admin/messages/${msgId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         fetchAdminMessages();
@@ -2681,7 +2741,13 @@ const App: React.FC = () => {
   const isCurrentGroupCall = !!activeChat && groupCall.groupId === activeChat && groupCall.status !== "idle";
   const currentGroupCallParticipants = activeChat ? (activeGroupCalls[activeChat] || (isCurrentGroupCall ? groupCall.participants : [])) : [];
   const isGroupCallAvailable = currentGroupCallParticipants.length > 0;
-  const activeMessages = activeChat 
+  const activeChatClearedAt = activeChat ? (chatClearedAt[activeChat] || 0) : 0;
+  const isActiveMessageVisible = (message: Message) => {
+    if (!activeChatClearedAt) return true;
+    const messageTime = new Date(message.timestamp).getTime();
+    return Number.isNaN(messageTime) || messageTime > activeChatClearedAt;
+  };
+  const activeMessages = (activeChat 
     ? (isChannelChat 
         ? (useChatStore.getState().channelPosts[activeChat] || []).map((p: ChannelPost) => {
             const attachments = parseChannelAttachments(p.attachments);
@@ -2706,7 +2772,7 @@ const App: React.FC = () => {
             } as any;
           }) 
         : (chats[activeChat]?.messages || [])) 
-    : [];
+    : []).filter(isActiveMessageVisible);
 
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -2717,11 +2783,46 @@ const App: React.FC = () => {
     overscan: 10,
   });
 
+  const isMessageScrollerNearBottom = useCallback(() => {
+    const scroller = parentRef.current;
+    if (!scroller) return true;
+    return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
+  }, []);
+
+  const scrollToLatestMessage = useCallback(() => {
+    if (!activeMessages.length) return;
+    virtualizer.scrollToIndex(activeMessages.length - 1, { align: "end" });
+    setShowScrollToBottom(false);
+  }, [activeMessages.length, virtualizer]);
+
   useEffect(() => {
-    if (activeMessages.length && virtualizer) {
-      virtualizer.scrollToIndex(activeMessages.length - 1, { align: "end" });
+    if (activeMessages.length) {
+      scrollToLatestMessage();
     }
-  }, [activeMessages.length, activeChat]);
+  }, [activeChat, scrollToLatestMessage]);
+
+  useEffect(() => {
+    if (!activeMessages.length) {
+      setShowScrollToBottom(false);
+      return;
+    }
+    if (isMessageScrollerNearBottom()) {
+      scrollToLatestMessage();
+    }
+  }, [activeMessages.length, isMessageScrollerNearBottom, scrollToLatestMessage]);
+
+  useEffect(() => {
+    const scroller = parentRef.current;
+    if (!scroller) return;
+
+    const updateScrollButton = () => {
+      setShowScrollToBottom(!isMessageScrollerNearBottom());
+    };
+
+    updateScrollButton();
+    scroller.addEventListener("scroll", updateScrollButton, { passive: true });
+    return () => scroller.removeEventListener("scroll", updateScrollButton);
+  }, [activeChat, activeMessages.length, isMessageScrollerNearBottom]);
 
   const getTypingIndicatorText = () => {
     if (!activeChat) return null;
@@ -3261,6 +3362,18 @@ const App: React.FC = () => {
                 })}
               </div>
             </div>
+
+            {showScrollToBottom && activeMessages.length > 0 && (
+              <button
+                type="button"
+                className="scroll-to-bottom-button"
+                title="К новым сообщениям"
+                aria-label="К новым сообщениям"
+                onClick={scrollToLatestMessage}
+              >
+                <ArrowDown size={20} />
+              </button>
+            )}
 
             <div className="input-area">
               {isRecording && (
@@ -3878,7 +3991,7 @@ const App: React.FC = () => {
               </label>
             </div>
             <div className="menu-drawer-version">
-              Nexa Desktop Версия 1.0 Beta Test
+              Nexa Android Версия 1.0 Beta Test
             </div>
           </div>
         </div>

@@ -68,14 +68,21 @@ export const storyRepository = {
       include: {
         user: true,
         views: {
-          where: { userId } // fetch views of this user to know if seen
+          include: { user: true },
         },
         reactions: true
       },
       orderBy: { createdAt: 'asc' }
     });
     const visible = await Promise.all(stories.map(async (story: any) => (
-      await canUserViewStory(story, userId) ? safeStory(story) : null
+      await canUserViewStory(story, userId)
+        ? safeStory({
+            ...story,
+            views: story.userId === userId
+              ? story.views
+              : story.views.filter((view: any) => view.userId === userId),
+          })
+        : null
     )));
     return visible.filter(Boolean);
   },

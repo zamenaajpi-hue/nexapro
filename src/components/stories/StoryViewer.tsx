@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { Volume2, VolumeX, X } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { getInitials } from '../../utils/helpers';
 import { socket } from '../../socket/client';
@@ -22,6 +22,11 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
   const [progress, setProgress] = useState(0);
   const [mediaReady, setMediaReady] = useState(false);
   const [mediaFailed, setMediaFailed] = useState(false);
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem('nexa_story_volume');
+    const parsed = saved === null ? 1 : Number(saved);
+    return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
+  });
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<string>>(new Set());
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -35,6 +40,14 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
     setMediaReady(false);
     setMediaFailed(false);
   }, [currentStory?.id]);
+
+  useEffect(() => {
+    localStorage.setItem('nexa_story_volume', String(volume));
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+      videoRef.current.muted = volume === 0;
+    }
+  }, [volume, currentStory?.id]);
 
   useEffect(() => {
     if (!currentStory || currentStory.userId === user?.id || viewedStoryIds.has(currentStory.id)) return;
@@ -149,6 +162,27 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
             {currentStory.userId === user?.id && (
               <span className="story-viewer-views">Просмотры: {currentStory.views?.length || 0}</span>
             )}
+            {isVideo && (
+              <div className="story-volume-control" onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
+                <button
+                  type="button"
+                  className="story-volume-button"
+                  aria-label={volume === 0 ? 'Unmute story' : 'Mute story'}
+                  onClick={() => setVolume((current) => current === 0 ? 1 : 0)}
+                >
+                  {volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={volume}
+                  aria-label="Story volume"
+                  onChange={(event) => setVolume(Number(event.target.value))}
+                />
+              </div>
+            )}
             <button type="button" onClick={closeViewer} className="story-viewer-close" aria-label="Close story">
               <X size={24} />
             </button>
@@ -167,6 +201,7 @@ export const StoryViewer: React.FC<{ stories: any[]; onClose: () => void; onUpda
               src={mediaSrc}
               autoPlay
               playsInline
+              muted={volume === 0}
               preload="metadata"
               onLoadedMetadata={() => setMediaReady(true)}
               onTimeUpdate={handleVideoTimeUpdate}

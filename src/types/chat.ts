@@ -88,6 +88,18 @@ export interface ChannelPost {
   updatedAt: Date;
   author: User;
   reactions: any[];
+  comments?: ChannelComment[];
+  commentsCount?: number;
+}
+
+export interface ChannelComment {
+  id: string;
+  postId: string;
+  authorId: string;
+  text: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  author: User;
 }
 
 export type ChatItem = User | Group | Channel;

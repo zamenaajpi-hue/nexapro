@@ -143,9 +143,13 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
       } else {
         const recipientSocket = onlineUsers.get(to)?.socketId;
         await chatStateRepository.touch(userId, to, 'direct');
-        await chatStateRepository.incrementUnread(to, userId, 'direct');
+        if (to === userId) {
+          await chatStateRepository.touch(userId, userId, 'direct');
+        } else {
+          await chatStateRepository.incrementUnread(to, userId, 'direct');
+        }
         await emitChatState(userId, to, 'direct');
-        await emitChatState(to, userId, 'direct');
+        if (to !== userId) await emitChatState(to, userId, 'direct');
         if (recipientSocket) io.to(recipientSocket).emit('message:new', dbMsg);
         if (!recipientSocket && to !== userId) {
           const senderName = onlineUsers.get(userId)?.nickname || onlineUsers.get(userId)?.username || 'Nexa';
@@ -159,7 +163,7 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
             url: '/',
           });
         }
-        if (to !== userId) {
+        if (to !== userId || !recipientSocket) {
           socket.emit('message:new', dbMsg);
         }
       }

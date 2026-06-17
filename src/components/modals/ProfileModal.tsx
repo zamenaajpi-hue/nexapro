@@ -17,14 +17,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, profileItem
   const isChannel = ('isChannel' in profileItem && profileItem.isChannel) || ('isGroup' in profileItem && profileItem.name.includes('📢'));
   const isGroupOrChannel = 'isGroup' in profileItem || ('isChannel' in profileItem && profileItem.isChannel);
 
-  const [coOwners, setCoOwners] = useState<string[]>(() => {
-    if (isGroupOrChannel) {
-      const saved = localStorage.getItem(`nexa_channel_coowners_${profileItem.id}`);
-      return saved ? JSON.parse(saved) : [];
-    }
-    return [];
-  });
-
   const groupMemberIds = isGroupOrChannel && 'members' in profileItem ? (profileItem.members || []).map(m => m.userId) : [];
   const addableUsers = onlineUsers.filter(u => !groupMemberIds.includes(u.id));
 
@@ -41,12 +33,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, profileItem
 
   const toggleCoOwner = (userId: string) => {
     const isOwner = ('creatorId' in profileItem && profileItem.creatorId === currentUser?.id) || ('ownerId' in profileItem && profileItem.ownerId === currentUser?.id);
-    if (isGroupOrChannel && isOwner) {
-      const updated = coOwners.includes(userId)
-        ? coOwners.filter(id => id !== userId)
-        : [...coOwners, userId];
-      setCoOwners(updated);
-      localStorage.setItem(`nexa_channel_coowners_${profileItem.id}`, JSON.stringify(updated));
+    if (socket && isChannel && isOwner && 'members' in profileItem) {
+      const member = profileItem.members.find(m => m.userId === userId);
+      const nextRole = member?.role === 'admin' ? 'subscriber' : 'admin';
+      socket.emit('channel:member-role', { channelId: profileItem.id, userId, role: nextRole });
     }
   };
 
@@ -187,7 +177,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, profileItem
               <div className="selection-list" style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {(profileItem.members || []).map(m => {
                   const isCreator = ('creatorId' in profileItem && profileItem.creatorId === m.userId) || ('ownerId' in profileItem && profileItem.ownerId === m.userId);
-                  const isUserCoOwner = coOwners.includes(m.userId);
+                  const isUserCoOwner = m.role === 'admin';
                   const isCurrentUserCreator = ('creatorId' in profileItem && profileItem.creatorId === currentUser?.id) || ('ownerId' in profileItem && profileItem.ownerId === currentUser?.id);
                   const canManage = isChannel && isCurrentUserCreator && !isCreator;
 

@@ -30,6 +30,7 @@ import {
   Camera,
   MicOff,
   UserPlus,
+  MessageCircle,
 } from "lucide-react";
 
 import { COLORS, EMOJIS, STICKERS, VOICE_STICKERS } from "./shared/constants";
@@ -55,7 +56,7 @@ import {
   storeAuthSession,
   updateStoredUser,
 } from "./utils/session";
-import type { ChannelPost } from "./types/chat";
+import type { ChannelComment, ChannelPost } from "./types/chat";
 import type { NotificationType } from "./utils/notifications";
 
 const AuthPage = lazy(() => import("./pages/auth/AuthPage").then((module) => ({ default: module.AuthPage })));
@@ -318,6 +319,9 @@ const App: React.FC = () => {
     null,
   );
   const [forwardSearchTerm, setForwardSearchTerm] = useState("");
+  const [expandedCommentPostId, setExpandedCommentPostId] = useState<string | null>(null);
+  const [channelComments, setChannelComments] = useState<Record<string, ChannelComment[]>>({});
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
 
   // Modals state
   const [showMyProfile, setShowMyProfile] = useState(false);
@@ -484,6 +488,12 @@ const App: React.FC = () => {
   const activeChatRef = useRef(activeChat);
 
   const chatWallpaperInputRef = useRef<HTMLInputElement>(null);
+
+  const getDirectChatUser = useCallback((chatId: string | null): User | undefined => {
+    if (!chatId) return undefined;
+    if (user?.id === chatId) return user;
+    return onlineUsers.find((u) => u.id === chatId) || allUsers.find((u) => u.id === chatId);
+  }, [allUsers, onlineUsers, user]);
   
   const handleChatWallpaperChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -513,6 +523,7 @@ const App: React.FC = () => {
 
   // WebRTC VoIP VoIP/Videocall references and states
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const groupCallStreamRef = useRef<MediaStream | null>(null);
@@ -570,6 +581,7 @@ const App: React.FC = () => {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+    pendingIceCandidatesRef.current = [];
     remoteStreamRef.current = null;
     setLocalStream(null);
     setRemoteStream(null);
@@ -600,6 +612,16 @@ const App: React.FC = () => {
           to: partnerId,
           signal: { candidate: event.candidate },
         });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected" && callStateRef.current.status !== "connected") {
+        callSounds.playCallStartSound();
+        setCallState((prev) => ({ ...prev, status: "connected", duration: 0 }));
+      }
+      if (["failed", "closed", "disconnected"].includes(pc.connectionState) && callStateRef.current.status === "connected") {
+        setCallState((prev) => ({ ...prev, status: "ended" }));
       }
     };
 
@@ -641,6 +663,18 @@ const App: React.FC = () => {
 
     peerConnectionRef.current = pc;
     return pc;
+  };
+
+  const flushPendingIceCandidates = async (pc: RTCPeerConnection) => {
+    if (!pc.remoteDescription || pendingIceCandidatesRef.current.length === 0) return;
+    const candidates = pendingIceCandidatesRef.current.splice(0);
+    for (const candidate of candidates) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.warn("[WebRTC] Failed to add queued ICE candidate:", error);
+      }
+    }
   };
 
   const removeGroupPeerConnection = (peerId: string) => {
@@ -853,9 +887,7 @@ const App: React.FC = () => {
           attachments: [{ url: mediaUrl, type, name: safeName }]
         });
       } else {
-        const recipient =
-          onlineUsers.find((u) => u.id === chatId) ||
-          allUsers.find((u) => u.id === chatId);
+        const recipient = getDirectChatUser(chatId);
         const msgPayload = {
           to: chatId,
           type,
@@ -1092,8 +1124,7 @@ const App: React.FC = () => {
   const handleInitiateCall = async (type: "audio" | "video") => {
     if (!activeChat) return;
     const partner =
-      onlineUsers.find((u) => u.id === activeChat) ||
-      allUsers.find((u) => u.id === activeChat);
+      activeChat === user?.id ? null : getDirectChatUser(activeChat);
     if (!partner) return;
 
     try {
@@ -1463,6 +1494,7 @@ const App: React.FC = () => {
 
     socket.on("channel:updated", (channel: Channel) => {
       useChatStore.getState().updateChannel(channel);
+      setProfileItem((current) => current?.id === channel.id ? channel : current);
     });
 
     socket.on("channel:deleted", ({ channelId }) => {
@@ -1490,6 +1522,28 @@ const App: React.FC = () => {
       const existing = state.channelPosts[channelId] || [];
       const updated = existing.map(p => p.id === post.id ? post : p);
       state.setChannelPosts(channelId, updated);
+    });
+
+    socket.on("channel:comments:history:result", ({ postId, comments }) => {
+      if (typeof postId !== "string" || !Array.isArray(comments)) return;
+      setChannelComments((prev) => ({ ...prev, [postId]: comments }));
+    });
+
+    socket.on("channel:comment:new", ({ channelId, postId, comment, commentsCount }) => {
+      if (typeof postId !== "string" || !comment) return;
+      setChannelComments((prev) => {
+        const existing = prev[postId] || [];
+        if (existing.some((item) => item.id === comment.id)) return prev;
+        return { ...prev, [postId]: [...existing, comment] };
+      });
+      if (typeof channelId === "string") {
+        const state = useChatStore.getState();
+        const existingPosts = state.channelPosts[channelId] || [];
+        state.setChannelPosts(
+          channelId,
+          existingPosts.map((post) => post.id === postId ? { ...post, commentsCount } : post),
+        );
+      }
     });
 
     const isRelevantMessage = (msg: Message) => {
@@ -1684,6 +1738,7 @@ const App: React.FC = () => {
             await pc.setRemoteDescription(
               new RTCSessionDescription(signal.sdp),
             );
+            await flushPendingIceCandidates(pc);
             if (signal.sdp.type === "offer") {
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
@@ -1700,7 +1755,11 @@ const App: React.FC = () => {
               }
             }
           } else if (signal.candidate) {
-            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+            if (!pc.remoteDescription) {
+              pendingIceCandidatesRef.current.push(signal.candidate);
+            } else {
+              await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+            }
           }
         }
       } catch (err) {
@@ -1825,6 +1884,8 @@ const App: React.FC = () => {
       socket.off("channel:history:result");
       socket.off("channel:post:new");
       socket.off("channel:post:updated");
+      socket.off("channel:comments:history:result");
+      socket.off("channel:comment:new");
       socket.off("message:new");
       socket.off("message:updated");
       socket.off("message:deleted");
@@ -2154,9 +2215,7 @@ const App: React.FC = () => {
 
     let payloadText = messageText;
 
-    const recipient =
-      onlineUsers.find((u) => u.id === activeChat) ||
-      allUsers.find((u) => u.id === activeChat);
+    const recipient = getDirectChatUser(activeChat);
 
     if (E2EE_ENABLED && recipient && recipient.publicKey && user?.publicKey) {
       const PrivKeyE2EE = await import("./utils/e2ee");
@@ -2217,7 +2276,7 @@ const App: React.FC = () => {
 
   const handleSendSticker = async (url: string) => {
     if (!activeChat) return;
-    const recipient = onlineUsers.find((u) => u.id === activeChat);
+    const recipient = getDirectChatUser(activeChat);
     const msgPayload = {
       to: activeChat,
       type: "sticker",
@@ -2255,7 +2314,7 @@ const App: React.FC = () => {
 
   const handleSendVoiceSticker = async (url: string) => {
     if (!activeChat) return;
-    const recipient = onlineUsers.find((u) => u.id === activeChat);
+    const recipient = getDirectChatUser(activeChat);
     const msgPayload = {
       to: activeChat,
       type: "audio",
@@ -2326,6 +2385,23 @@ const App: React.FC = () => {
     }
   };
 
+  const toggleChannelComments = (postId: string) => {
+    setExpandedCommentPostId((current) => {
+      const next = current === postId ? null : postId;
+      if (next && socket.connected && !channelComments[postId]) {
+        socket.emit("channel:comments:history", { postId });
+      }
+      return next;
+    });
+  };
+
+  const sendChannelComment = (postId: string) => {
+    const text = (commentDrafts[postId] || "").trim();
+    if (!text || !socket.connected) return;
+    socket.emit("channel:comment:create", { postId, text });
+    setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
+  };
+
   const getPlaintextForForwarding = async (msg: Message): Promise<string> => {
     if (msg.type !== "text") return "";
     if (!msg.text?.startsWith("[E2EE]")) return msg.text || "";
@@ -2370,8 +2446,7 @@ const App: React.FC = () => {
 
       let payloadText = msgText;
       const recipient =
-        onlineUsers.find((u) => u.id === targetId) ||
-        allUsers.find((u) => u.id === targetId);
+        getDirectChatUser(targetId);
 
       if (
         E2EE_ENABLED &&
@@ -2731,13 +2806,16 @@ const App: React.FC = () => {
     if (file) uploadFile(file, file.name, activeChat);
   };
 
-  const activeChatItem = [...onlineUsers, ...groups, ...channels, ...allUsers].find(
+  const savedMessagesChatItem: User | null = user && activeChat === user.id
+    ? { ...user, nickname: "Избранное", status: "online" }
+    : null;
+  const activeChatItem = savedMessagesChatItem || [...onlineUsers, ...groups, ...channels, ...allUsers].find(
     (i) => i.id === activeChat,
   );
   const isChannelChat = activeChatItem && 'isChannel' in activeChatItem && activeChatItem.isChannel;
   const isGroupChat = !!activeChatItem && "isGroup" in activeChatItem && activeChatItem.isGroup;
   const isDirectChat = !!activeChatItem && !("members" in activeChatItem);
-  const isActiveChatOnline = isDirectChat && onlineUsers.some((onlineUser) => onlineUser.id === activeChatItem?.id);
+  const isActiveChatOnline = isDirectChat && (activeChatItem?.id === user?.id || onlineUsers.some((onlineUser) => onlineUser.id === activeChatItem?.id));
   const isCurrentGroupCall = !!activeChat && groupCall.groupId === activeChat && groupCall.status !== "idle";
   const currentGroupCallParticipants = activeChat ? (activeGroupCalls[activeChat] || (isCurrentGroupCall ? groupCall.participants : [])) : [];
   const isGroupCallAvailable = currentGroupCallParticipants.length > 0;
@@ -2768,7 +2846,8 @@ const App: React.FC = () => {
               from: p.author,
               isChannelPost: true,
               views: p.views,
-              reactions: p.reactions
+              reactions: p.reactions,
+              commentsCount: p.commentsCount ?? p.comments?.length ?? 0,
             } as any;
           }) 
         : (chats[activeChat]?.messages || [])) 
@@ -3109,7 +3188,7 @@ const App: React.FC = () => {
                 className="chat-actions"
                 style={{ display: "flex", gap: "8px" }}
               >
-                {activeChatItem && !("members" in activeChatItem) && (
+                {activeChatItem && !("members" in activeChatItem) && activeChatItem.id !== user.id && (
                   <>
                     <button
                       title="Голосовой звонок"
@@ -3357,6 +3436,75 @@ const App: React.FC = () => {
                         }
                         onForward={setForwardingMessage}
                       />
+                      {(msg as any).isChannelPost && (
+                        <div className="channel-comments-panel">
+                          <button
+                            type="button"
+                            className="channel-comments-toggle"
+                            onClick={() => toggleChannelComments(msg.id)}
+                          >
+                            <MessageCircle size={15} />
+                            <span>
+                              {((msg as any).commentsCount || 0) > 0
+                                ? `${(msg as any).commentsCount} комментариев`
+                                : "Комментировать"}
+                            </span>
+                          </button>
+
+                          {expandedCommentPostId === msg.id && (
+                            <div className="channel-comments-thread">
+                              {(channelComments[msg.id] || []).length > 0 ? (
+                                <div className="channel-comments-list">
+                                  {(channelComments[msg.id] || []).map((comment) => (
+                                    <div key={comment.id} className="channel-comment-item">
+                                      <div
+                                        className="avatar channel-comment-avatar"
+                                        style={{
+                                          backgroundColor: comment.author.avatarColor,
+                                          backgroundImage: comment.author.avatarImage ? `url(${comment.author.avatarImage})` : "none",
+                                        }}
+                                      >
+                                        {!comment.author.avatarImage && comment.author.initials}
+                                      </div>
+                                      <div className="channel-comment-body">
+                                        <div className="channel-comment-meta">
+                                          <span>{comment.author.nickname}</span>
+                                          <small>{new Date(comment.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
+                                        </div>
+                                        <p>{comment.text}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="channel-comments-empty">Комментариев пока нет</div>
+                              )}
+
+                              <div className="channel-comment-compose">
+                                <input
+                                  type="text"
+                                  value={commentDrafts[msg.id] || ""}
+                                  placeholder="Добавить комментарий..."
+                                  onChange={(event) => setCommentDrafts((prev) => ({ ...prev, [msg.id]: event.target.value }))}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      sendChannelComment(msg.id);
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => sendChannelComment(msg.id)}
+                                  disabled={!(commentDrafts[msg.id] || "").trim()}
+                                >
+                                  <Send size={15} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

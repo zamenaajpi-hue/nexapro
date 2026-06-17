@@ -13,7 +13,16 @@ export const safeChannelPayload = (channel: any) => ({
 export const safeChannelPostPayload = (post: any) => ({
   ...post,
   author: post.author ? safeUser(post.author) : post.author,
+  comments: Array.isArray(post.comments) ? post.comments.map(safeChannelCommentPayload) : post.comments,
+  commentsCount: post._count?.comments ?? post.commentsCount ?? (Array.isArray(post.comments) ? post.comments.length : 0),
 });
+
+export function safeChannelCommentPayload(comment: any) {
+  return {
+    ...comment,
+    author: comment.author ? safeUser(comment.author) : comment.author,
+  };
+}
 
 export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map<string, any>) => {
   const userId = socket.userId;
@@ -28,6 +37,20 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
       canView: Boolean(member) || channel.isPublic === true,
       canManage: member?.role === 'owner' || member?.role === 'admin' || channel.ownerId === userId
     };
+  };
+
+  const emitChannelUpdated = (channel: any) => {
+    channel.members.forEach((m: any) => {
+      const mSocket = onlineUsers.get(m.userId)?.socketId;
+      if (mSocket) io.to(mSocket).emit('channel:updated', { ...safeChannelPayload(channel), isChannel: true });
+    });
+  };
+
+  const emitToChannelMembers = (channel: any, event: string, payload: any) => {
+    channel.members.forEach((m: any) => {
+      const mSocket = onlineUsers.get(m.userId)?.socketId;
+      if (mSocket) io.to(mSocket).emit(event, payload);
+    });
   };
 
   socket.on('channel:create', async (payload: any) => {
@@ -96,14 +119,30 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
       await channelRepository.addMember(channelId, targetUserId);
 
       const updatedChannel = await channelRepository.findById(channelId, true);
-      if (updatedChannel) {
-        updatedChannel.members.forEach((m: any) => {
-          const mSocket = onlineUsers.get(m.userId)?.socketId;
-          if (mSocket) io.to(mSocket).emit('channel:updated', { ...safeChannelPayload(updatedChannel), isChannel: true });
-        });
-      }
+      if (updatedChannel) emitChannelUpdated(updatedChannel);
     } catch (err) {
       console.error('[DB_ERR] Add channel member failed:', err);
+    }
+  });
+
+  socket.on('channel:member-role', async (payload: any) => {
+    try {
+      const { channelId, userId: targetUserId, role } = payload || {};
+      if (typeof channelId !== 'string' || typeof targetUserId !== 'string') return;
+      if (role !== 'admin' && role !== 'subscriber') return;
+
+      const access = await getChannelAccess(channelId);
+      if (!access.channel || access.channel.ownerId !== userId) {
+        socket.emit('error', { message: 'Access denied' });
+        return;
+      }
+      if (targetUserId === access.channel.ownerId) return;
+
+      await channelRepository.setMemberRole(channelId, targetUserId, role);
+      const updatedChannel = await channelRepository.findById(channelId, true);
+      if (updatedChannel) emitChannelUpdated(updatedChannel);
+    } catch (err) {
+      console.error('[DB_ERR] Channel member role update failed:', err);
     }
   });
 
@@ -120,7 +159,7 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
       
       const posts = await db.channelPost.findMany({
         where: { channelId },
-        include: { author: true, reactions: true },
+        include: { author: true, reactions: true, _count: { select: { comments: true } } },
         orderBy: { createdAt: 'desc' },
         take: 50
       });
@@ -156,7 +195,7 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
               ? JSON.stringify(attachments)
               : null
         },
-        include: { author: true, reactions: true }
+        include: { author: true, reactions: true, _count: { select: { comments: true } } }
       });
 
       channel.members.forEach((m: any) => {
@@ -205,7 +244,7 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
       
       const updatedPost = await db.channelPost.findUnique({
         where: { id: postId },
-        include: { author: true, reactions: true }
+        include: { author: true, reactions: true, _count: { select: { comments: true } } }
       });
       
       if (updatedPost) {
@@ -248,7 +287,7 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
         return tx.channelPost.update({
           where: { id: postId },
           data: { views: { increment: 1 } },
-          include: { author: true, reactions: true }
+          include: { author: true, reactions: true, _count: { select: { comments: true } } }
         });
       });
 
@@ -263,6 +302,76 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
       }
     } catch (err) {
       console.error('[DB_ERR] Channel post view increment failed:', err);
+    }
+  });
+
+  socket.on('channel:comments:history', async (payload: any) => {
+    try {
+      const { postId } = payload || {};
+      if (typeof postId !== 'string') return;
+      const { db } = await import('../../services/db');
+      const post = await db.channelPost.findUnique({ where: { id: postId } });
+      if (!post) return;
+      const access = await getChannelAccess(post.channelId);
+      if (!access.canView) {
+        socket.emit('error', { message: 'Access denied' });
+        return;
+      }
+
+      const comments = await db.channelComment.findMany({
+        where: { postId },
+        include: { author: true },
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+      });
+
+      socket.emit('channel:comments:history:result', {
+        channelId: post.channelId,
+        postId,
+        comments: comments.map(safeChannelCommentPayload),
+      });
+    } catch (err) {
+      console.error('[DB_ERR] Channel comments history failed:', err);
+    }
+  });
+
+  socket.on('channel:comment:create', async (payload: any) => {
+    try {
+      const { postId, text } = payload || {};
+      if (typeof postId !== 'string' || typeof text !== 'string' || !text.trim()) return;
+      const { db } = await import('../../services/db');
+      const post = await db.channelPost.findUnique({ where: { id: postId } });
+      if (!post) return;
+      const access = await getChannelAccess(post.channelId);
+      if (!access.canView) {
+        socket.emit('error', { message: 'Access denied' });
+        return;
+      }
+
+      const comment = await db.channelComment.create({
+        data: {
+          postId,
+          authorId: userId,
+          text: text.trim().slice(0, 2000),
+        },
+        include: { author: true },
+      });
+      const commentsCount = await db.channelComment.count({ where: { postId } });
+      const payloadToSend = {
+        channelId: post.channelId,
+        postId,
+        comment: safeChannelCommentPayload(comment),
+        commentsCount,
+      };
+
+      const channel = await channelRepository.findById(post.channelId, true);
+      if (channel) {
+        emitToChannelMembers(channel, 'channel:comment:new', payloadToSend);
+      } else {
+        socket.emit('channel:comment:new', payloadToSend);
+      }
+    } catch (err) {
+      console.error('[DB_ERR] Channel comment create failed:', err);
     }
   });
 

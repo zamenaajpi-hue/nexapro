@@ -15,6 +15,7 @@ function getInitialSocketUrl(): string {
 
 export const socket: Socket = io(getInitialSocketUrl(), {
   transports: ["websocket", "polling"],
+  reconnection: true,
   reconnectionDelay: 1000,
   reconnectionDelayMax: 15000,
   reconnectionAttempts: Infinity,

@@ -530,6 +530,8 @@ const App: React.FC = () => {
   const groupPeerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const groupRemoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localVideoTileRef = useRef<HTMLDivElement | null>(null);
+  const callVideoGridRef = useRef<HTMLDivElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const allUsersRef = useRef(allUsers);
@@ -554,6 +556,87 @@ const App: React.FC = () => {
   useEffect(() => {
     onlineUsersRef.current = onlineUsers;
   }, [onlineUsers]);
+
+  const clampLocalVideoPosition = useCallback((nextPosition: { x: number; y: number }) => {
+    const container = callVideoGridRef.current;
+    const tile = localVideoTileRef.current;
+    if (!container || !tile) return nextPosition;
+
+    const maxX = Math.max(0, container.clientWidth - tile.offsetWidth);
+    const maxY = Math.max(0, container.clientHeight - tile.offsetHeight);
+    return {
+      x: Math.min(Math.max(0, nextPosition.x), maxX),
+      y: Math.min(Math.max(0, nextPosition.y), maxY),
+    };
+  }, []);
+
+  const ensureLocalVideoPosition = useCallback(() => {
+    const container = callVideoGridRef.current;
+    const tile = localVideoTileRef.current;
+    if (!container || !tile) return;
+
+    setLocalVideoPosition((current) => {
+      const fallback = {
+        x: Math.max(0, container.clientWidth - tile.offsetWidth - 12),
+        y: Math.max(0, container.clientHeight - tile.offsetHeight - 12),
+      };
+      return clampLocalVideoPosition(current || fallback);
+    });
+  }, [clampLocalVideoPosition]);
+
+  useEffect(() => {
+    if (callState.status !== "connected" || callState.type !== "video") {
+      setLocalVideoPosition(null);
+      return;
+    }
+
+    ensureLocalVideoPosition();
+    window.addEventListener("resize", ensureLocalVideoPosition);
+    window.addEventListener("orientationchange", ensureLocalVideoPosition);
+    return () => {
+      window.removeEventListener("resize", ensureLocalVideoPosition);
+      window.removeEventListener("orientationchange", ensureLocalVideoPosition);
+    };
+  }, [callState.status, callState.type, ensureLocalVideoPosition]);
+
+  const handleLocalVideoPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const container = callVideoGridRef.current;
+    const tile = localVideoTileRef.current;
+    if (!container || !tile) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
+    localVideoDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - tileRect.left,
+      offsetY: event.clientY - tileRect.top,
+    };
+    tile.setPointerCapture(event.pointerId);
+    setLocalVideoPosition(clampLocalVideoPosition({
+      x: tileRect.left - containerRect.left,
+      y: tileRect.top - containerRect.top,
+    }));
+  };
+
+  const handleLocalVideoPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = localVideoDragRef.current;
+    const container = callVideoGridRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    setLocalVideoPosition(clampLocalVideoPosition({
+      x: event.clientX - containerRect.left - drag.offsetX,
+      y: event.clientY - containerRect.top - drag.offsetY,
+    }));
+  };
+
+  const handleLocalVideoPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    const tile = localVideoTileRef.current;
+    if (tile && localVideoDragRef.current?.pointerId === event.pointerId) {
+      tile.releasePointerCapture(event.pointerId);
+    }
+    localVideoDragRef.current = null;
+  };
 
   // Initialize remote audio element on component mount
   useEffect(() => {
@@ -848,6 +931,7 @@ const App: React.FC = () => {
 
       const res = await fetch(resolveApiUrl("/api/upload"), {
         method: "POST",
+        headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : undefined,
         body: formData,
       });
 
@@ -1399,6 +1483,15 @@ const App: React.FC = () => {
   }, [user?.id]);
 
   const [isConnected, setIsConnected] = useState(socket.connected);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'offline' | 'reconnecting'>(
+    typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : socket.connected ? 'connected' : 'connecting',
+  );
+  const [localVideoPosition, setLocalVideoPosition] = useState<{ x: number; y: number } | null>(null);
+  const localVideoDragRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
 
   // Self-heal/Bootstrap E2EE keys if missing
   useEffect(() => {
@@ -1425,6 +1518,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleConnect = async () => {
       setIsConnected(true);
+      setConnectionStatus("connected");
       socket.emit("join");
       // VPN and weak mobile networks often flap long-lived WebSocket tunnels.
       // Keep the queue local until a fresh connection exists, then replay once.
@@ -1444,18 +1538,39 @@ const App: React.FC = () => {
       }
     };
 
-    const handleDisconnect = () => {
+    const handleDisconnect = (reason?: string) => {
       setIsConnected(false);
+      setConnectionStatus(
+        typeof navigator !== "undefined" && !navigator.onLine
+          ? "offline"
+          : reason === "io client disconnect"
+            ? "connecting"
+            : "reconnecting",
+      );
       if (groupCallRef.current.status !== "idle") {
         cleanupGroupCall(false);
       }
       setActiveGroupCalls({});
     };
 
+    const handleReconnectAttempt = () => setConnectionStatus("reconnecting");
+    const handleReconnect = () => setConnectionStatus("connected");
+    const handleReconnectFailed = () => setConnectionStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "reconnecting");
+    const handleOnline = () => {
+      setConnectionStatus(socket.connected ? "connected" : "reconnecting");
+      if (!socket.connected) socket.connect();
+    };
+    const handleOffline = () => setConnectionStatus("offline");
+
     if (!user) return;
 
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
+    socket.io.on("reconnect_attempt", handleReconnectAttempt);
+    socket.io.on("reconnect", handleReconnect);
+    socket.io.on("reconnect_failed", handleReconnectFailed);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
 
     socket.on("users:online", (users: User[]) => {
       setOnlineUsers(users.filter((u) => u.id !== user.id));
@@ -1470,7 +1585,10 @@ const App: React.FC = () => {
     });
 
     socket.on("group:updated", (group: Group) => {
-      updateGroup(group);
+      const exists = useChatStore.getState().groups.some((item) => item.id === group.id);
+      if (exists) updateGroup(group);
+      else addGroup(group);
+      setProfileItem((current) => current?.id === group.id ? group : current);
     });
 
     socket.on("group:deleted", ({ groupId }) => {
@@ -1493,7 +1611,9 @@ const App: React.FC = () => {
     });
 
     socket.on("channel:updated", (channel: Channel) => {
-      useChatStore.getState().updateChannel(channel);
+      const state = useChatStore.getState();
+      if (state.channels.some((item) => item.id === channel.id)) state.updateChannel(channel);
+      else state.addChannel(channel);
       setProfileItem((current) => current?.id === channel.id ? channel : current);
     });
 
@@ -1619,6 +1739,7 @@ const App: React.FC = () => {
     });
 
     socket.on("connect_error", (err) => {
+      setConnectionStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "reconnecting");
       if (err.message === "Authentication error") {
         handleLogout();
       } else if (!err.message.includes("xhr poll error") && !err.message.includes("timeout") && !err.message.includes("server error")) {
@@ -1870,6 +1991,11 @@ const App: React.FC = () => {
     return () => {
       socket.off("connect");
       socket.off("disconnect");
+      socket.io.off("reconnect_attempt", handleReconnectAttempt);
+      socket.io.off("reconnect", handleReconnect);
+      socket.io.off("reconnect_failed", handleReconnectFailed);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       socket.off("connect_error");
       socket.off("users:online");
       socket.off("groups:update");
@@ -2923,6 +3049,13 @@ const App: React.FC = () => {
   };
 
   const typingText = getTypingIndicatorText();
+  const connectionStatusLabel = connectionStatus === "connecting"
+    ? "Подключение..."
+    : connectionStatus === "offline"
+      ? "Нет сети"
+      : connectionStatus === "reconnecting"
+        ? "Переподключение..."
+        : "";
 
   if (!user) {
     return (
@@ -2952,6 +3085,11 @@ const App: React.FC = () => {
           </div>
         ))}
       </div>
+      {connectionStatusLabel && (
+        <div className={`connection-banner connection-${connectionStatus}`} role="status">
+          {connectionStatusLabel}
+        </div>
+      )}
       <main 
         className={`chat-area ${!activeChat ? "mobile-hidden" : ""} ${chatWallpaper ? "has-wallpaper" : ""}`}
         style={{ backgroundImage: chatWallpaper ? `url(${chatWallpaper})` : 'none', position: 'relative', overflow: 'hidden' }}
@@ -3593,7 +3731,10 @@ const App: React.FC = () => {
                         <span
                           key={e}
                           className="emoji-item"
-                          onClick={() => setMessageText((prev) => prev + e)}
+                          onClick={() => {
+                            setMessageText((prev) => prev + e);
+                            setShowEmojiPicker(false);
+                          }}
                         >
                           {e}
                         </span>
@@ -4829,7 +4970,7 @@ const App: React.FC = () => {
 
           <div className="call-body">
             {callState.type === "video" && callState.status === "connected" && (
-              <div className="call-video-grid">
+              <div className="call-video-grid" ref={callVideoGridRef}>
                 <div className="call-video-tile">
                   {callState.isVideoOff ? (
                     <div
@@ -4862,8 +5003,16 @@ const App: React.FC = () => {
                   )}
                 </div>
                 {/* Local user small tile overlay */}
-                <div className="call-video-tile local">
-                  {callState.isMuted ? (
+                <div
+                  className="call-video-tile local"
+                  ref={localVideoTileRef}
+                  onPointerDown={handleLocalVideoPointerDown}
+                  onPointerMove={handleLocalVideoPointerMove}
+                  onPointerUp={handleLocalVideoPointerEnd}
+                  onPointerCancel={handleLocalVideoPointerEnd}
+                  style={localVideoPosition ? { left: localVideoPosition.x, top: localVideoPosition.y, right: "auto", bottom: "auto" } : undefined}
+                >
+                  {callState.isVideoOff ? (
                     <div
                       style={{
                         width: "100%",
@@ -4967,12 +5116,17 @@ const App: React.FC = () => {
                     </button>
                     {callState.type === "video" && (
                       <button
-                        onClick={() =>
+                        onClick={() => {
+                          if (localStreamRef.current) {
+                            localStreamRef.current.getVideoTracks().forEach(track => {
+                              track.enabled = callState.isVideoOff;
+                            });
+                          }
                           setCallState((prev) => ({
                             ...prev,
                             isVideoOff: !prev.isVideoOff,
-                          }))
-                        }
+                          }));
+                        }}
                         className={`call-btn utility ${callState.isVideoOff ? "active" : ""}`}
                         title={
                           callState.isVideoOff

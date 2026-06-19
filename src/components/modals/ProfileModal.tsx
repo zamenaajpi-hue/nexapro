@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, UserPlus, ShieldAlert, Shield, Trash2 } from 'lucide-react';
 import { User, Group, Channel } from '../../types/chat';
 import { getInitials } from '../../utils/helpers';
@@ -13,6 +13,7 @@ interface ProfileModalProps {
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, profileItem, onlineUsers = [], socket, currentUser }) => {
   const [showAddList, setShowAddList] = useState(false);
+  const [showAvatarLightbox, setShowAvatarLightbox] = useState(false);
   
   const isChannel = ('isChannel' in profileItem && profileItem.isChannel) || ('isGroup' in profileItem && profileItem.name.includes('📢'));
   const isGroupOrChannel = 'isGroup' in profileItem || ('isChannel' in profileItem && profileItem.isChannel);
@@ -57,7 +58,19 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, profileItem
     onClose();
   };
 
+  useEffect(() => {
+    if (!showAvatarLightbox) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowAvatarLightbox(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAvatarLightbox]);
+
+  const avatarInitials = ('initials' in profileItem ? profileItem.initials : null) || getInitials('name' in profileItem ? profileItem.name : (profileItem as any).nickname);
+
   return (
+    <>
     <div className="modal active" onClick={onClose}>
       <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '440px', padding: '0', overflowY: 'auto', borderRadius: '16px', maxHeight: '90vh' }}>
         <header style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -69,8 +82,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, profileItem
         
         <div className="settings-body" style={{ padding: '24px' }}>
           <div className="profile-preview-large" style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-            <div 
+            <button
+              type="button"
               className="avatar-large" 
+              onClick={() => setShowAvatarLightbox(true)}
+              aria-label="Открыть аватар"
               style={{ 
                 backgroundColor: profileItem.avatarColor,
                 backgroundImage: profileItem.avatarImage ? `url(${profileItem.avatarImage})` : 'none',
@@ -84,11 +100,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, profileItem
                 fontWeight: 'bold',
                 color: 'white',
                 border: '3px solid var(--accent-color)',
-                boxShadow: '0 8px 16px rgba(0, 239, 255, 0.15)'
+                boxShadow: '0 8px 16px rgba(0, 239, 255, 0.15)',
+                cursor: 'zoom-in'
               }}
             >
-              {!profileItem.avatarImage && (('initials' in profileItem ? profileItem.initials : null) || getInitials('name' in profileItem ? profileItem.name : (profileItem as any).nickname))}
-            </div>
+              {!profileItem.avatarImage && avatarInitials}
+            </button>
           </div>
           
           <div className="profile-info-center" style={{ textAlign: 'center', marginBottom: '20px' }}>
@@ -261,5 +278,32 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, profileItem
         </div>
       </div>
     </div>
+    {showAvatarLightbox && (
+      <div className="avatar-lightbox" onClick={() => setShowAvatarLightbox(false)} role="dialog" aria-modal="true">
+        <button
+          type="button"
+          className="avatar-lightbox-close"
+          onClick={(event) => {
+            event.stopPropagation();
+            setShowAvatarLightbox(false);
+          }}
+          aria-label="Закрыть"
+          title="Закрыть"
+        >
+          <X size={22} />
+        </button>
+        <div
+          className="avatar-lightbox-image"
+          onClick={(event) => event.stopPropagation()}
+          style={{
+            backgroundColor: profileItem.avatarColor,
+            backgroundImage: profileItem.avatarImage ? `url(${profileItem.avatarImage})` : 'none',
+          }}
+        >
+          {!profileItem.avatarImage && avatarInitials}
+        </div>
+      </div>
+    )}
+    </>
   );
 };

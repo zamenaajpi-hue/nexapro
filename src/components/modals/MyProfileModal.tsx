@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Calendar, Check, Copy, Edit3, Info, LogOut, Phone, Upload, User as UserIcon, X } from 'lucide-react';
+import { Calendar, Check, Copy, Edit3, Info, LogOut, Mail, Phone, Upload, User as UserIcon, X } from 'lucide-react';
 import { User } from '../../types/chat';
 import { getInitials } from '../../utils/helpers';
 import { COLORS } from '../../shared/constants';
@@ -18,6 +18,7 @@ interface MyProfileModalProps {
 }
 
 const normalizePhoneInput = (value: string) => value.replace(/[^\d+()\-\s]/g, '').slice(0, 32);
+const normalizeVisibility = (value?: User['emailVisibility']) => value || 'PRIVATE';
 
 const roleLabel = (role?: User['role']) => {
   if (role === 'owner') return 'Владелец';
@@ -43,6 +44,8 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
   const [dateOfBirth, setDateOfBirth] = useState(user.dateOfBirth || '');
   const [activityStatus, setActivityStatus] = useState(user.activityStatus || '');
   const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber || '');
+  const [emailVisibility, setEmailVisibility] = useState<NonNullable<User['emailVisibility']>>(normalizeVisibility(user.emailVisibility));
+  const [phoneVisibility, setPhoneVisibility] = useState<NonNullable<User['phoneVisibility']>>(normalizeVisibility(user.phoneVisibility));
   const [bio, setBio] = useState(user.bio || '');
   const [nickname, setNickname] = useState(user.nickname || '');
   const [avatarColor, setAvatarColor] = useState(user.avatarColor);
@@ -97,6 +100,8 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
       dateOfBirth: dateOfBirth || null,
       activityStatus: activityStatus.trim() || null,
       phoneNumber: phoneNumber.trim() || null,
+      emailVisibility,
+      phoneVisibility,
       bio: bio.trim(),
       nickname: nextNickname,
       avatarColor,
@@ -111,6 +116,8 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
     setDateOfBirth(user.dateOfBirth || '');
     setActivityStatus(user.activityStatus || '');
     setPhoneNumber(user.phoneNumber || '');
+    setEmailVisibility(normalizeVisibility(user.emailVisibility));
+    setPhoneVisibility(normalizeVisibility(user.phoneVisibility));
     setBio(user.bio || '');
     setNickname(user.nickname || '');
     setAvatarColor(user.avatarColor);
@@ -207,6 +214,25 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
                 <textarea value={bio} onChange={(event) => setBio(event.target.value)} placeholder="Расскажите немного о себе" rows={3} />
               </label>
 
+              <div className="profile-form-grid">
+                <label>
+                  <span>Email privacy</span>
+                  <select value={emailVisibility} onChange={(event) => setEmailVisibility(event.target.value as NonNullable<User['emailVisibility']>)}>
+                    <option value="PRIVATE">Private</option>
+                    <option value="CONTACTS">Contacts</option>
+                    <option value="PUBLIC">Public</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Phone privacy</span>
+                  <select value={phoneVisibility} onChange={(event) => setPhoneVisibility(event.target.value as NonNullable<User['phoneVisibility']>)}>
+                    <option value="PRIVATE">Private</option>
+                    <option value="CONTACTS">Contacts</option>
+                    <option value="PUBLIC">Public</option>
+                  </select>
+                </label>
+              </div>
+
               <div>
                 <span className="profile-field-label">Цвет профиля</span>
                 <div className="color-options profile-color-options">
@@ -264,6 +290,14 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
                     {copiedId ? 'Скопировано' : <><Copy size={14} /> Копировать</>}
                   </button>
                 )}
+              </div>
+
+              <div className="profile-info-row">
+                <Mail size={20} />
+                <div>
+                  <span>Email</span>
+                  <strong>{user.email || 'Не указан'}</strong>
+                </div>
               </div>
 
               <div className="profile-info-row">

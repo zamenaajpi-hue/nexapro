@@ -2,7 +2,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { userRepository } from '../repositories/user.repository';
 import { groupRepository } from '../repositories/group.repository';
 import { z } from 'zod';
-import { privateUserDto, publicUserDto, publicUsersDto } from '../utils/safeUser';
+import { normalizeProfileVisibility, privateUserDto, publicUserDto, publicUsersDto } from '../utils/safeUser';
 import { messageRepository } from '../repositories/message.repository';
 import { INVALID_RUSSIAN_PHONE_MESSAGE, normalizeRussianPhone } from '../utils/phone';
 
@@ -16,7 +16,9 @@ const profileUpdateSchema = z.object({
   lastName: z.string().nullable().optional(),
   dateOfBirth: z.string().nullable().optional(),
   activityStatus: z.string().nullable().optional(),
-  publicKey: z.string().optional()
+  publicKey: z.string().optional(),
+  emailVisibility: z.enum(['PRIVATE', 'CONTACTS', 'PUBLIC']).optional(),
+  phoneVisibility: z.enum(['PRIVATE', 'CONTACTS', 'PUBLIC']).optional()
 });
 
 const duplicateProfileMessage = (err: any) => {
@@ -147,6 +149,8 @@ export const handleUsers = (
         lastName: data.lastName,
         dateOfBirth: data.dateOfBirth,
         publicKey: data.publicKey,
+        emailVisibility: data.emailVisibility ? normalizeProfileVisibility(data.emailVisibility) : undefined,
+        phoneVisibility: data.phoneVisibility ? normalizeProfileVisibility(data.phoneVisibility) : undefined,
         initials: data.nickname ? data.nickname.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : undefined
       };
 

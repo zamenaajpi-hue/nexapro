@@ -10,6 +10,32 @@ const publicFields = (u: any) => ({
   status: u.status,
 });
 
+export type ProfileVisibility = 'PRIVATE' | 'CONTACTS' | 'PUBLIC';
+
+export const normalizeProfileVisibility = (value: unknown): ProfileVisibility => {
+  return value === 'CONTACTS' || value === 'PUBLIC' || value === 'PRIVATE' ? value : 'PRIVATE';
+};
+
+type ProfileViewOptions = {
+  viewerId?: string | null;
+  isAdmin?: boolean;
+  isContact?: boolean;
+};
+
+const canViewPrivateProfileField = (
+  owner: any,
+  visibility: unknown,
+  options: ProfileViewOptions = {},
+) => {
+  if (!owner) return false;
+  if (options.isAdmin || (options.viewerId && options.viewerId === owner.id)) return true;
+
+  const normalized = normalizeProfileVisibility(visibility);
+  if (normalized === 'PUBLIC') return true;
+  if (normalized === 'CONTACTS') return options.isContact === true;
+  return false;
+};
+
 export const publicUserDto = (u: any) => {
   if (!u) return u;
   return publicFields(u);
@@ -25,6 +51,8 @@ export const privateUserDto = (u: any) => {
     lastName: u.lastName,
     dateOfBirth: u.dateOfBirth,
     activityStatus: u.activityStatus,
+    emailVisibility: normalizeProfileVisibility(u.emailVisibility),
+    phoneVisibility: normalizeProfileVisibility(u.phoneVisibility),
     role: u.role,
     balance: u.balance,
     ownedAvatars: u.ownedAvatars,
@@ -34,6 +62,22 @@ export const privateUserDto = (u: any) => {
 };
 
 export const adminUserDto = (u: any) => privateUserDto(u);
+
+export const profileViewUserDto = (u: any, options: ProfileViewOptions = {}) => {
+  if (!u) return u;
+  const result: any = publicFields(u);
+  result.emailVisibility = normalizeProfileVisibility(u.emailVisibility);
+  result.phoneVisibility = normalizeProfileVisibility(u.phoneVisibility);
+
+  if (canViewPrivateProfileField(u, u.emailVisibility, options)) {
+    result.email = u.email;
+  }
+  if (canViewPrivateProfileField(u, u.phoneVisibility, options)) {
+    result.phoneNumber = u.phoneNumber;
+  }
+
+  return result;
+};
 
 export const publicUsersDto = (users: any[]) => users.map(publicUserDto);
 export const privateUsersDto = (users: any[]) => users.map(privateUserDto);

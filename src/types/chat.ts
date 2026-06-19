@@ -13,6 +13,8 @@ export interface User {
   activityStatus?: string | null;
   email?: string | null;
   phoneNumber?: string | null;
+  emailVisibility?: 'PRIVATE' | 'CONTACTS' | 'PUBLIC';
+  phoneVisibility?: 'PRIVATE' | 'CONTACTS' | 'PUBLIC';
   role?: 'user' | 'admin' | 'owner';
   status: 'online' | 'offline';
   balance?: number;

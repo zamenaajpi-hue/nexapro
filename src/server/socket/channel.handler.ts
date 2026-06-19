@@ -1,5 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { channelRepository } from '../repositories/channel.repository';
+import { chatStateRepository } from '../repositories/chat-state.repository';
 import { createChannelSchema, updateChannelSchema } from '../validations/group.schema';
 import { generateGroupAvatar } from '../../utils/avatarGenerator';
 import { safeUser } from '../utils/safeUser';
@@ -117,9 +118,17 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
       }
 
       await channelRepository.addMember(channelId, targetUserId);
+      await chatStateRepository.touch(targetUserId, channelId, 'channel');
 
       const updatedChannel = await channelRepository.findById(channelId, true);
-      if (updatedChannel) emitChannelUpdated(updatedChannel);
+      if (updatedChannel) {
+        emitChannelUpdated(updatedChannel);
+        const targetSocket = onlineUsers.get(targetUserId)?.socketId;
+        if (targetSocket) {
+          io.to(targetSocket).emit('channel:new', { ...safeChannelPayload(updatedChannel), isChannel: true });
+          io.to(targetSocket).emit('chat:states', await chatStateRepository.findForUser(targetUserId));
+        }
+      }
     } catch (err) {
       console.error('[DB_ERR] Add channel member failed:', err);
     }

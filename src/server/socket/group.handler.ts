@@ -1,5 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { groupRepository } from '../repositories/group.repository';
+import { chatStateRepository } from '../repositories/chat-state.repository';
 import { createGroupSchema, updateGroupSchema } from '../validations/group.schema';
 import { generateGroupAvatar } from '../../utils/avatarGenerator';
 import { safeUser } from '../utils/safeUser';
@@ -92,6 +93,7 @@ export const handleGroups = (io: SocketIOServer, socket: any, onlineUsers: Map<s
       }
       
       await groupRepository.addMember(groupId, targetUserId);
+      await chatStateRepository.touch(targetUserId, groupId, 'group');
       
       const updatedGroup = await groupRepository.findById(groupId, true);
       if (updatedGroup) {
@@ -99,6 +101,11 @@ export const handleGroups = (io: SocketIOServer, socket: any, onlineUsers: Map<s
           const mSocket = onlineUsers.get(m.userId)?.socketId;
           if (mSocket) io.to(mSocket).emit('group:updated', { ...safeGroupPayload(updatedGroup), isGroup: true });
         });
+        const targetSocket = onlineUsers.get(targetUserId)?.socketId;
+        if (targetSocket) {
+          io.to(targetSocket).emit('group:new', { ...safeGroupPayload(updatedGroup), isGroup: true });
+          io.to(targetSocket).emit('chat:states', await chatStateRepository.findForUser(targetUserId));
+        }
       }
     } catch (err) {
       console.error('[DB_ERR] Add group member failed:', err);

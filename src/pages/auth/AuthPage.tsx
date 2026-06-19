@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NexaLogo } from '../../shared/ui/NexaLogo';
+import { PasswordField } from '../../shared/ui/PasswordField';
 import { COLORS } from '../../shared/constants';
 import { isNativeAndroidApp } from '../../utils/platform';
 
@@ -211,8 +212,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
             />
           )}
 
-          <input
-            type="password"
+          <PasswordField
+            autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
             placeholder="Пароль"
             value={password}
             onChange={(event) => setPassword(event.target.value)}

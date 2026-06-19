@@ -462,6 +462,42 @@ input:focus, textarea:focus {
     box-shadow: 0 0 25px rgba(103, 232, 249, 0.15);
 }
 
+.password-field {
+    position: relative;
+    width: 100%;
+    margin-bottom: 1.5rem;
+}
+
+.password-field .password-field-input {
+    margin-bottom: 0;
+    padding-right: 3.25rem;
+}
+
+.password-field-toggle {
+    position: absolute;
+    top: 50%;
+    right: 0.45rem;
+    width: 42px;
+    height: 42px;
+    transform: translateY(-50%);
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.password-field-toggle:hover,
+.password-field-toggle:focus-visible {
+    color: var(--accent-color);
+    background: rgba(255, 255, 255, 0.06);
+    outline: none;
+}
+
 .avatar-selector {
     text-align: left;
     margin-bottom: 2rem;
@@ -1195,6 +1231,27 @@ input:focus, textarea:focus {
 
 .toast-warning {
     border-color: rgba(245, 158, 11, 0.55);
+}
+
+.connection-banner {
+    position: fixed;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1800;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(8, 13, 26, 0.9);
+    color: white;
+    font-size: 0.82rem;
+    font-weight: 700;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
+}
+
+.connection-offline {
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fecaca;
 }
 
 /* Chat Area */
@@ -2084,6 +2141,51 @@ input:focus, textarea:focus {
     backdrop-filter: blur(15px);
 }
 
+.avatar-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 2200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.88);
+    backdrop-filter: blur(12px);
+    animation: fadeIn 0.18s ease;
+}
+
+.avatar-lightbox-image {
+    width: min(78vw, 460px);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: clamp(3rem, 14vw, 7rem);
+    font-weight: 800;
+    border: 3px solid var(--accent-color);
+    box-shadow: 0 20px 80px rgba(0, 0, 0, 0.65);
+}
+
+.avatar-lightbox-close {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    width: 44px;
+    height: 44px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    color: white;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
 .modal.active {
     display: flex;
 }
@@ -2295,10 +2397,19 @@ input:focus, textarea:focus {
 }
 
 .profile-edit-form input,
-.profile-edit-form textarea {
+.profile-edit-form textarea,
+.profile-edit-form select {
     margin-bottom: 0;
     border-radius: 8px;
     padding: 10px 12px;
+}
+
+.profile-edit-form select {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    background-color: rgba(255, 255, 255, 0.03);
+    color: white;
+    outline: none;
 }
 
 .profile-form-grid {
@@ -3608,6 +3719,14 @@ body.night-mode .chat-area {
     border: 2px solid var(--accent-color);
     box-shadow: 0 8px 16px rgba(0,0,0,0.5);
     z-index: 10;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    overflow: hidden;
+}
+
+.call-video-tile.local:active {
+    cursor: grabbing;
 }
 
 .call-actions-row {

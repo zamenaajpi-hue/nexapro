@@ -69,6 +69,7 @@ export function hasExpectedFileSignature(filePath: string, mimeType: string) {
   if (!detected) return false;
   if (mime === detected) return true;
   if (mime === 'video/x-matroska' && detected === 'video/webm') return true;
+  if (mime === 'audio/webm' && detected === 'video/webm') return true;
   if ((mime === 'video/quicktime' || mime === 'audio/mp4' || mime === 'audio/x-m4a') && detected === 'video/mp4') return true;
   return false;
 }

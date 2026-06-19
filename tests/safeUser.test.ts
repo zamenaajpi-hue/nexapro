@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { privateUserDto, publicUserDto, safeUser, safeUsers } from '../src/server/utils/safeUser';
+import { privateUserDto, profileViewUserDto, publicUserDto, safeUser, safeUsers } from '../src/server/utils/safeUser';
 import { assertNoLeakedUserFields } from './testHelpers';
 
 describe('safeUser', () => {
@@ -92,5 +92,36 @@ describe('safeUser', () => {
     assert.equal(result.role, 'user');
     assert.equal(result.balance, 42);
     assert.equal(Object.prototype.hasOwnProperty.call(result, 'passwordHash'), false);
+  });
+
+  it('keeps profile contact fields private by default', () => {
+    const result = profileViewUserDto({
+      id: 'owner',
+      nickname: 'sam',
+      email: 'user@example.com',
+      phoneNumber: '+10000000000',
+      emailVisibility: 'PRIVATE',
+      phoneVisibility: 'PRIVATE',
+    }, { viewerId: 'viewer' });
+
+    assert.equal(Object.prototype.hasOwnProperty.call(result, 'email'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(result, 'phoneNumber'), false);
+  });
+
+  it('allows profile contact fields for owner, admin, public, and contacts visibility', () => {
+    const user = {
+      id: 'owner',
+      nickname: 'sam',
+      email: 'user@example.com',
+      phoneNumber: '+10000000000',
+      emailVisibility: 'PUBLIC',
+      phoneVisibility: 'CONTACTS',
+    };
+
+    assert.equal(profileViewUserDto(user, { viewerId: 'viewer' }).email, 'user@example.com');
+    assert.equal(Object.prototype.hasOwnProperty.call(profileViewUserDto(user, { viewerId: 'viewer' }), 'phoneNumber'), false);
+    assert.equal(profileViewUserDto(user, { viewerId: 'viewer', isContact: true }).phoneNumber, '+10000000000');
+    assert.equal(profileViewUserDto({ ...user, emailVisibility: 'PRIVATE', phoneVisibility: 'PRIVATE' }, { viewerId: 'owner' }).email, 'user@example.com');
+    assert.equal(profileViewUserDto({ ...user, emailVisibility: 'PRIVATE', phoneVisibility: 'PRIVATE' }, { viewerId: 'viewer', isAdmin: true }).phoneNumber, '+10000000000');
   });
 });

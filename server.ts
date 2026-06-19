@@ -21,7 +21,7 @@ import { authenticateAdmin } from './src/server/middlewares/admin.middleware';
 import { authenticateUser } from './src/server/middlewares/auth.middleware';
 import { setupSocketHandlers } from './src/server/socket';
 import { storyController } from './src/server/stories/story.controller';
-import { safeUser } from './src/server/utils/safeUser';
+import { profileViewUserDto, safeUser } from './src/server/utils/safeUser';
 import { extensionFromMime, hasExpectedFileSignature, isAllowedUploadMime } from './src/server/utils/fileValidation';
 
 const normalizePhone = (phone?: string | null) => {
@@ -267,6 +267,47 @@ async function startServer() {
     } catch (err: any) {
       console.error('[API Error] Failed to fetch users:', err);
       res.status(500).json({ error: 'Failed to fetch users' });
+    }
+  });
+
+  app.get('/api/users/:id/profile', authenticateUser, async (req: any, res) => {
+    try {
+      const { db } = await import('./src/services/db');
+      const [profileUser, viewer] = await Promise.all([
+        db.user.findUnique({ where: { id: req.params.id } }),
+        db.user.findUnique({ where: { id: req.userId }, select: { id: true, role: true } }),
+      ]);
+      if (!profileUser) return res.status(404).json({ error: 'User not found' });
+
+      let isContact = false;
+      if (req.userId !== profileUser.id) {
+        const [sharedGroup, sharedChannel] = await Promise.all([
+          db.groupMember.findFirst({
+            where: {
+              userId: req.userId,
+              group: { members: { some: { userId: profileUser.id } } },
+            },
+            select: { id: true },
+          }),
+          db.channelMember.findFirst({
+            where: {
+              userId: req.userId,
+              channel: { members: { some: { userId: profileUser.id } } },
+            },
+            select: { id: true },
+          }),
+        ]);
+        isContact = Boolean(sharedGroup || sharedChannel);
+      }
+
+      res.json(profileViewUserDto(profileUser, {
+        viewerId: req.userId,
+        isAdmin: viewer?.role === 'admin' || viewer?.role === 'owner',
+        isContact,
+      }));
+    } catch (err: any) {
+      console.error('[API Error] Failed to fetch user profile:', err);
+      res.status(500).json({ error: 'Failed to fetch user profile' });
     }
   });
 

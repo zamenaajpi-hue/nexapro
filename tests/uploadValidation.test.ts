@@ -49,6 +49,7 @@ describe('upload validation', () => {
     withTempFile(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x93, 0x42, 0x82, 0x88]), (filePath) => {
       assert.equal(detectFileSignature(filePath), 'video/webm');
       assert.equal(hasExpectedFileSignature(filePath, 'video/webm;codecs=vp8,opus'), true);
+      assert.equal(hasExpectedFileSignature(filePath, 'audio/webm;codecs=opus'), true);
       assert.equal(hasExpectedFileSignature(filePath, 'video/x-matroska'), true);
     });
   });

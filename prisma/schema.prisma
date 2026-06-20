@@ -12,10 +12,13 @@ model User {
   email          String?       @unique
   googleSub      String?       @unique
   phoneNumber    String?
+  emailVisibility String       @default("PRIVATE")
+  phoneVisibility String       @default("PRIVATE")
   normalizedPhone String?      @unique
   nickname       String        @unique
   nexaId         String?       @unique
   passwordHash   String?
+  cloudPasswordHash String?
   avatarColor    String
   avatarImage    String?
   initials       String?

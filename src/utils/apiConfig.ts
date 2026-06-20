@@ -107,7 +107,7 @@ export const testServerConnection = async (url: string): Promise<boolean> => {
     const response = await fetchHealthCheck(url, 5000);
     return response.ok;
   } catch (err) {
-    console.error('[API] Connection test failed:', err);
+    console.warn('[API] Connection test failed:', err);
     return false;
   }
 };

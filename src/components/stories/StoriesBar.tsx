@@ -51,7 +51,7 @@ export const StoriesBar: React.FC = () => {
         setActiveStories(data);
       }
     } catch (e) {
-      console.error("fetch stories", e);
+      console.warn("fetch stories", e);
     }
   };
 

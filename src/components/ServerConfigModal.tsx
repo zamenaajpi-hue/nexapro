@@ -61,7 +61,7 @@ export const ServerConfigModal: React.FC<ServerConfigModalProps> = ({ onSubmit, 
       console.log('[Config] Server URL saved:', serverUrl);
       onSubmit(serverUrl);
     } catch (err) {
-      console.error('[Config] Connection test failed:', err);
+      console.warn('[Config] Connection test failed:', err);
       setError('Ошибка подключения. Проверьте адрес сервера и попробуйте снова.');
     } finally {
       setIsLoading(false);

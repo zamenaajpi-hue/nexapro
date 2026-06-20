@@ -222,6 +222,17 @@ const parseChannelAttachments = (
 
 const E2EE_ENABLED = true;
 
+const VIDEO_CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 480, max: 720 },
+  height: { ideal: 480, max: 720 },
+  frameRate: { ideal: 24, max: 30 },
+};
+
+const mediaConstraintsFor = (video: boolean): MediaStreamConstraints => ({
+  audio: true,
+  video: video ? VIDEO_CAPTURE_CONSTRAINTS : false,
+});
+
 const parseE2EEEnvelope = (text?: string | null): { r?: string; s?: string } | null => {
   if (!text?.startsWith("[E2EE]")) return null;
   try {
@@ -1008,7 +1019,7 @@ const App: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error("File upload failed:", err);
+      console.warn("File upload failed:", err);
       notify("Не удалось загрузить файл");
     }
   };
@@ -1050,7 +1061,7 @@ const App: React.FC = () => {
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err) {
-      console.error("Failed to start recording:", err);
+      console.warn("Failed to start recording:", err);
       notify("Не удалось получить доступ к микрофону");
     }
   };
@@ -1058,10 +1069,7 @@ const App: React.FC = () => {
   const startVideoNoteRecording = async () => {
     try {
       await ensureNativeMediaPermissions({ audio: true, video: true });
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: { facingMode: "user" },
-      });
+      const stream = await navigator.mediaDevices.getUserMedia(mediaConstraintsFor(true));
       const mimeType = pickSupportedMime([
         "video/webm;codecs=vp8,opus",
         "video/webm",
@@ -1097,7 +1105,7 @@ const App: React.FC = () => {
       setIsVideoRecording(true);
       setVideoRecordingDuration(0);
     } catch (err) {
-      console.error("Failed to access camera for video note:", err);
+      console.warn("Failed to access camera for video note:", err);
       notify("Не удалось получить доступ к камере или микрофону");
     }
   };
@@ -1215,10 +1223,7 @@ const App: React.FC = () => {
       cleanupCall();
 
       // Use electron-compatible media request
-      const constraints: MediaStreamConstraints = {
-        audio: true,
-        video: type === "video",
-      };
+      const constraints = mediaConstraintsFor(type === "video");
       await ensureNativeMediaPermissions({ audio: true, video: type === "video" });
       
       // Check for Electron context
@@ -1275,7 +1280,7 @@ const App: React.FC = () => {
         return logs;
       });
     } catch (err) {
-      console.error("Failed to access media devices for outgoing call:", err);
+      console.warn("Failed to access media devices for outgoing call:", err);
       notify("Потребуются разрешения на микрофон/камеру для совершения вызовов", "warning");
     }
   };
@@ -1289,10 +1294,7 @@ const App: React.FC = () => {
 
       const type = callState.type || "audio";
       await ensureNativeMediaPermissions({ audio: true, video: type === "video" });
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: type === "video",
-      });
+      const stream = await navigator.mediaDevices.getUserMedia(mediaConstraintsFor(type === "video"));
 
       localStreamRef.current = stream;
       setLocalStream(stream);
@@ -1312,7 +1314,7 @@ const App: React.FC = () => {
         }
       }, 1200);
     } catch (err) {
-      console.error("Failed to access media devices for incoming call:", err);
+      console.warn("Failed to access media devices for incoming call:", err);
       notify("Потребуются разрешения на микрофон/камеру для принятия вызова", "warning");
       handleRejectCall();
     }
@@ -2688,7 +2690,7 @@ const App: React.FC = () => {
           setAllUsers(data.filter((u: any) => u.id !== user.id));
         }
       } catch (err) {
-        console.error("Failed to fetch all users:", err);
+        console.warn("Failed to fetch all users:", err);
       }
     };
     fetchUsers();

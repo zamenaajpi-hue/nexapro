@@ -377,13 +377,6 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
       
       const message = await db.message.findUnique({ where: { id: messageId } });
       if (!message || message.fromId !== userId) return;
-      if ((message.text || '').startsWith('[E2EE]')) {
-        socket.emit('message:edit:error', {
-          messageId,
-          error: 'Encrypted messages cannot be edited yet',
-        });
-        return;
-      }
       
       const updatedMsg = safeMessage(await db.message.update({
         where: { id: messageId },

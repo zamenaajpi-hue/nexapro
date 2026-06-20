@@ -29,6 +29,17 @@ const duplicateProfileMessage = (err: any) => {
   return 'Такие данные уже используются другим аккаунтом';
 };
 
+const stripUndefined = (data: Record<string, any>) =>
+  Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+
+const nullableTrimmed = (value: unknown) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
 const safeMember = (member: any) => ({
   ...member,
   user: member.user ? publicUserDto(member.user) : member.user,
@@ -128,7 +139,8 @@ export const handleUsers = (
       const currentUser = await userRepository.findById(userId);
       if (!currentUser) return;
 
-      const normalizedPhone = data.phoneNumber === undefined ? undefined : normalizeRussianPhone(data.phoneNumber);
+      const cleanPhoneNumber = nullableTrimmed(data.phoneNumber) as string | null | undefined;
+      const normalizedPhone = cleanPhoneNumber === undefined ? undefined : normalizeRussianPhone(cleanPhoneNumber);
       if (normalizedPhone) {
         const existingPhone = await userRepository.findByNormalizedPhone(normalizedPhone);
         if (existingPhone && existingPhone.id !== userId) {
@@ -137,22 +149,22 @@ export const handleUsers = (
         }
       }
 
-      const updateData: any = {
-        nickname: data.nickname,
+      const updateData: any = stripUndefined({
+        nickname: nullableTrimmed(data.nickname),
         avatarColor: data.avatarColor,
-        avatarImage: data.avatarImage,
-        bio: data.bio,
-        phoneNumber: data.phoneNumber,
+        avatarImage: nullableTrimmed(data.avatarImage),
+        bio: nullableTrimmed(data.bio),
+        phoneNumber: cleanPhoneNumber,
         normalizedPhone,
-        activityStatus: data.activityStatus,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        dateOfBirth: data.dateOfBirth,
+        activityStatus: nullableTrimmed(data.activityStatus),
+        firstName: nullableTrimmed(data.firstName),
+        lastName: nullableTrimmed(data.lastName),
+        dateOfBirth: nullableTrimmed(data.dateOfBirth),
         publicKey: data.publicKey,
         emailVisibility: data.emailVisibility ? normalizeProfileVisibility(data.emailVisibility) : undefined,
         phoneVisibility: data.phoneVisibility ? normalizeProfileVisibility(data.phoneVisibility) : undefined,
         initials: data.nickname ? data.nickname.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : undefined
-      };
+      });
 
       const updatedUser = await userRepository.update(userId, updateData);
       const safeUpdatedUser = privateUserDto(updatedUser);

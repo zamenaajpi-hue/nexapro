@@ -60,6 +60,10 @@ export const authController = {
     try {
       const data = loginSchema.parse(req.body);
       const result = await authService.login(data);
+      if ('requiresCloudPassword' in result) {
+        res.json(result);
+        return;
+      }
       setAuthCookie(res, result.token);
       res.json(result);
     } catch (err: any) {
@@ -67,7 +71,7 @@ export const authController = {
         res.status(400).json(validationError(err));
         return;
       }
-      res.status(err.message === 'Invalid credentials' ? 401 : 500).json({ error: err.message || 'Login failed' });
+      res.status(err.message === 'Invalid credentials' || err.message === 'Invalid cloud password' ? 401 : 500).json({ error: err.message || 'Login failed' });
     }
   },
 

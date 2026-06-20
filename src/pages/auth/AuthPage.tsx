@@ -18,7 +18,8 @@ interface AuthPageProps {
     nickname: string,
     selectedColor: string,
     phoneNumber?: string,
-  ) => Promise<void>;
+    cloudPassword?: string,
+  ) => Promise<{ requiresCloudPassword?: boolean } | void>;
   onGoogleAuth: (token: { credential?: string; accessToken?: string }, selectedColor: string) => Promise<void>;
   loading: boolean;
   error: string | null;
@@ -55,6 +56,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [cloudPassword, setCloudPassword] = useState('');
+  const [cloudPasswordStep, setCloudPasswordStep] = useState(false);
   const [nickname, setNickname] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -137,16 +140,31 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
     };
   }, [allowGoogleAuth, googleClientId, onGoogleAuth, selectedColor]);
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLocalError(null);
+
+    if (cloudPasswordStep) {
+      const result = await onAuth('login', email.trim(), password, '', selectedColor, undefined, cloudPassword);
+      if ((result as { requiresCloudPassword?: boolean } | undefined)?.requiresCloudPassword) setCloudPasswordStep(true);
+      return;
+    }
 
     if (authMode === 'register' && phoneNumber.trim() && !RUSSIAN_PHONE_REGEX.test(phoneNumber.trim())) {
       setLocalError(PHONE_HINT);
       return;
     }
 
-    onAuth(authMode, email.trim(), password, nickname.trim(), selectedColor, phoneNumber.trim());
+    if (authMode === 'register' && cloudPassword.length < 6) {
+      setLocalError('Облачный пароль должен быть не короче 6 символов');
+      return;
+    }
+
+    const result = await onAuth(authMode, email.trim(), password, nickname.trim(), selectedColor, phoneNumber.trim(), cloudPassword);
+    if (authMode === 'login' && (result as { requiresCloudPassword?: boolean } | undefined)?.requiresCloudPassword) {
+      setCloudPassword('');
+      setCloudPasswordStep(true);
+    }
   };
 
   const handleGoogleClick = () => {
@@ -175,21 +193,23 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
         </div>
 
         <p className="subtitle">
-          {authMode === 'login' ? 'С возвращением!' : 'Присоединяйтесь к глобальной сети'}
+          {cloudPasswordStep ? 'Введите облачный пароль' : authMode === 'login' ? 'С возвращением!' : 'Присоединяйтесь к глобальной сети'}
         </p>
 
         {visibleError && <div className="error-message">{visibleError}</div>}
 
         <form onSubmit={handleSubmit}>
-          <input
-            type="email"
-            placeholder="Электронная почта"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
+          {!cloudPasswordStep && (
+            <input
+              type="email"
+              placeholder="Электронная почта"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          )}
 
-          {authMode === 'register' && (
+          {authMode === 'register' && !cloudPasswordStep && (
             <input
               type="text"
               placeholder="Имя пользователя"
@@ -200,7 +220,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
             />
           )}
 
-          {authMode === 'register' && (
+          {authMode === 'register' && !cloudPasswordStep && (
             <input
               type="tel"
               inputMode="tel"
@@ -212,19 +232,31 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
             />
           )}
 
-          <PasswordField
-            autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
-            placeholder="Пароль"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
+          {!cloudPasswordStep && (
+            <PasswordField
+              autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+              placeholder="Пароль"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+          )}
+
+          {(authMode === 'register' || cloudPasswordStep) && (
+            <PasswordField
+              autoComplete="new-password"
+              placeholder="Облачный пароль"
+              value={cloudPassword}
+              onChange={(event) => setCloudPassword(event.target.value)}
+              required
+            />
+          )}
 
           <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Проверяем...' : authMode === 'login' ? 'Войти' : 'Создать аккаунт'}
+            {loading ? 'Проверяем...' : cloudPasswordStep ? 'Продолжить' : authMode === 'login' ? 'Войти' : 'Создать аккаунт'}
           </button>
 
-          {allowGoogleAuth && googleClientId && (
+          {allowGoogleAuth && googleClientId && !cloudPasswordStep && (
             <div className="google-auth-compact">
               <button
                 type="button"
@@ -241,17 +273,34 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuth, onGoogleAuth, loadin
         </form>
 
         <p className="auth-switch-copy">
-          {authMode === 'login' ? 'Нет аккаунта?' : 'Уже есть аккаунт?'}
-          <button
-            type="button"
-            className="btn-link"
-            onClick={() => {
-              setAuthMode(authMode === 'login' ? 'register' : 'login');
-              setLocalError(null);
-            }}
-          >
-            {authMode === 'login' ? 'Зарегистрироваться' : 'Войти'}
-          </button>
+          {cloudPasswordStep ? (
+            <button
+              type="button"
+              className="btn-link"
+              onClick={() => {
+                setCloudPasswordStep(false);
+                setCloudPassword('');
+                setLocalError(null);
+              }}
+            >
+              Назад ко входу
+            </button>
+          ) : (
+            <>
+              {authMode === 'login' ? 'Нет аккаунта?' : 'Уже есть аккаунт?'}
+              <button
+                type="button"
+                className="btn-link"
+                onClick={() => {
+                  setAuthMode(authMode === 'login' ? 'register' : 'login');
+                  setCloudPassword('');
+                  setLocalError(null);
+                }}
+              >
+                {authMode === 'login' ? 'Зарегистрироваться' : 'Войти'}
+              </button>
+            </>
+          )}
         </p>
       </div>
     </div>

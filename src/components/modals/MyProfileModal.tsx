@@ -7,6 +7,8 @@ import { socket } from '../../socket/client';
 import { notifyApp } from '../../utils/notifications';
 import { resolveApiUrl } from '../../utils/api';
 import { withAuthHeader } from '../../utils/session';
+import { compressImageForUpload } from '../../utils/mediaOptimization';
+import { uploadFormDataJson } from '../../utils/upload';
 import { MarketplaceModal } from './MarketplaceModal';
 import { StoryViewer } from '../stories/StoryViewer';
 
@@ -52,6 +54,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
   const [avatarImage, setAvatarImage] = useState<string | null>(user.avatarImage || null);
   const [copiedId, setCopiedId] = useState(false);
   const [archiveStories, setArchiveStories] = useState<any[] | null>(null);
+  const [isAvatarUploading, setIsAvatarUploading] = useState(false);
 
   const ownedAvatars = useMemo(() => parseOwnedAvatars(user.ownedAvatars), [user.ownedAvatars]);
   const displayName = [firstName, lastName].filter(Boolean).join(' ') || `@${user.nickname}`;
@@ -83,13 +86,25 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
     window.setTimeout(() => setCopiedId(false), 2000);
   };
 
-  const handleAvatarFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => setAvatarImage(reader.result as string);
-    reader.readAsDataURL(file);
+    setIsAvatarUploading(true);
+    try {
+      const uploadFile = await compressImageForUpload(file, file.name);
+      const formData = new FormData();
+      formData.append('file', uploadFile, file.name);
+      const data = await uploadFormDataJson<{ url?: string }>('/api/upload', formData);
+      if (!data.url) throw new Error('Upload response did not include a URL');
+      setAvatarImage(data.url);
+    } catch (error) {
+      console.error('Failed to upload avatar:', error);
+      notifyApp('Не удалось загрузить аватар');
+    } finally {
+      setIsAvatarUploading(false);
+      event.target.value = '';
+    }
   };
 
   const handleSave = () => {
@@ -143,8 +158,9 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
                 backgroundImage: previewAvatarImage ? `url(${previewAvatarImage})` : 'none',
               }}
               title={isEditing ? 'Изменить аватар' : undefined}
+              disabled={isAvatarUploading}
             >
-              {!previewAvatarImage && getInitials(nickname || user.nickname)}
+              {isAvatarUploading ? '...' : !previewAvatarImage && getInitials(nickname || user.nickname)}
               {isEditing && (
                 <span className="avatar-edit-overlay profile-avatar-overlay">
                   <Upload size={16} />
@@ -272,7 +288,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
 
               <div className="profile-edit-actions">
                 <button type="button" className="btn-secondary" onClick={cancelEditing}>Отмена</button>
-                <button type="button" className="btn-primary" onClick={handleSave}>
+                <button type="button" className="btn-primary" onClick={handleSave} disabled={isAvatarUploading}>
                   <Check size={16} /> Сохранить
                 </button>
               </div>

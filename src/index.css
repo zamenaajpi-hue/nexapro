@@ -633,6 +633,15 @@ input:focus, textarea:focus {
     padding: 0.5rem;
 }
 
+.chat-list-heading {
+    padding: 0.65rem 1rem 0.25rem;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
 /* Stories viewer */
 .story-viewer-overlay {
     position: fixed;
@@ -1339,6 +1348,26 @@ input:focus, textarea:focus {
     box-shadow: none;
 }
 
+.saved-chat-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    color: #ffffff;
+    background: linear-gradient(145deg, #66a6ff, #2563eb);
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.32);
+}
+
+.saved-chat-subtitle {
+    color: var(--text-secondary);
+}
+
+.saved-chat-subtitle::before {
+    display: none;
+}
+
 .typing-indicator {
     font-size: 0.75rem;
     color: var(--accent-color);
@@ -1666,6 +1695,39 @@ input:focus, textarea:focus {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
+}
+
+.saved-chat-container .messages {
+    position: relative;
+    background-color: #17469d;
+    background-image:
+        radial-gradient(circle at 18px 18px, rgba(255, 255, 255, 0.14) 0 2px, transparent 3px),
+        radial-gradient(circle at 88px 58px, rgba(255, 255, 255, 0.10) 0 2px, transparent 3px),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(45deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+        linear-gradient(160deg, #1c4bb0, #12377f);
+    background-size: 112px 112px, 128px 128px, 56px 56px, 56px 56px, 100% 100%;
+}
+
+.saved-chat-container .message {
+    box-shadow: 0 12px 30px rgba(8, 18, 44, 0.22);
+}
+
+.saved-messages-empty {
+    position: sticky;
+    top: 48%;
+    align-self: center;
+    z-index: 2;
+    max-width: 220px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    color: #ffffff;
+    background: rgba(18, 24, 42, 0.58);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: center;
+    backdrop-filter: blur(6px);
 }
 
 .messages-virtual-canvas {

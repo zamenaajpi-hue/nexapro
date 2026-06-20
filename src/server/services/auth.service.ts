@@ -113,6 +113,7 @@ export const authService = {
     }
 
     const passwordHash = await bcrypt.hash(data.password, 10);
+    const cloudPasswordHash = await bcrypt.hash(data.cloudPassword, 10);
     const user = await userRepository.create({
       email,
       phoneNumber: data.phoneNumber || null,
@@ -120,6 +121,7 @@ export const authService = {
       nickname: data.nickname,
       nexaId: await createUniqueNexaId(),
       passwordHash,
+      cloudPasswordHash,
       avatarColor: data.avatarColor || '#6C63FF',
       initials: getInitials(data.nickname),
       publicKey: data.publicKey,
@@ -137,6 +139,14 @@ export const authService = {
 
     const isValid = await bcrypt.compare(data.password, user.passwordHash);
     if (!isValid) throw new Error('Invalid credentials');
+
+    if (user.cloudPasswordHash) {
+      if (!data.cloudPassword) {
+        return { requiresCloudPassword: true };
+      }
+      const isCloudPasswordValid = await bcrypt.compare(data.cloudPassword, user.cloudPasswordHash);
+      if (!isCloudPasswordValid) throw new Error('Invalid cloud password');
+    }
 
     return createSession(user);
   },

@@ -6,6 +6,7 @@ import { notifyApp } from '../../utils/notifications';
 import { resolveApiUrl } from '../../utils/api';
 import { compressImageForUpload } from '../../utils/mediaOptimization';
 import { withAuthHeader } from '../../utils/session';
+import { uploadFormDataJson } from '../../utils/upload';
 
 export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void }> = ({ onClose, onCreated }) => {
   const { user } = useChatStore();
@@ -38,15 +39,8 @@ export const StoryCreator: React.FC<{ onClose: () => void, onCreated: () => void
       const formData = new FormData();
       formData.append('file', uploadFile, file.name);
 
-      // Upload media
-      const upRes = await fetch(resolveApiUrl('/api/upload'), {
-        method: 'POST',
-        headers: withAuthHeader(),
-        body: formData,
-      });
-
-      if (!upRes.ok) throw new Error('Upload failed');
-      const { url } = await upRes.json();
+      // Upload media. CapacitorHttp cannot preserve multipart FormData on Android, so use the shared upload helper.
+      const { url } = await uploadFormDataJson<{ url: string }>('/api/upload', formData);
 
       // Create story
       const createRes = await fetch(resolveApiUrl('/api/stories'), {

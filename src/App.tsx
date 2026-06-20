@@ -48,6 +48,7 @@ import { resolveApiUrl } from "./utils/api";
 import { isNativeCapacitorApp } from "./utils/platform";
 import { ensureNativeMediaPermissions } from "./utils/nativePermissions";
 import { compressImageForUpload } from "./utils/mediaOptimization";
+import { uploadFormDataJson } from "./utils/upload";
 import {
   clearAuthSession,
   getAuthToken,
@@ -220,6 +221,17 @@ const parseChannelAttachments = (
 };
 
 const E2EE_ENABLED = true;
+
+const parseE2EEEnvelope = (text?: string | null): { r?: string; s?: string } | null => {
+  if (!text?.startsWith("[E2EE]")) return null;
+  try {
+    const parsed = JSON.parse(text.slice(6));
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {
+    // Invalid encrypted payloads are handled as non-editable plain text.
+  }
+  return null;
+};
 
 const getUploadKind = (file: Blob, uploadedMime?: string): Message["type"] => {
   const mime = file.type || uploadedMime || "";
@@ -929,25 +941,13 @@ const App: React.FC = () => {
       const formData = new FormData();
       formData.append("file", uploadBlob, originalName);
 
-      const res = await fetch(resolveApiUrl("/api/upload"), {
-        method: "POST",
-        headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : undefined,
-        body: formData,
-      });
-
-      let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const text = await res.text();
-        console.error("Non-JSON response:", text);
-        throw new Error(
-          `Server error: ${res.status}. File might be too large.`,
-        );
-      }
-
-      if (!res.ok) throw new Error(data.error || "Upload failed");
+      const data = await uploadFormDataJson<{
+        fileId?: string;
+        url?: string;
+        type?: string;
+        name?: string;
+        error?: string;
+      }>("/api/upload", formData);
 
       const uploadedMime = typeof data.type === "string" ? data.type : file.type;
       const type = getUploadKind(file, uploadedMime);
@@ -2195,6 +2195,7 @@ const App: React.FC = () => {
     nickname: string,
     selectedColor: string,
     phoneNumber?: string,
+    cloudPassword?: string,
   ) => {
     setLoading(true);
     setError(null);
@@ -2214,11 +2215,12 @@ const App: React.FC = () => {
 
       const endpoint = isRegister ? "/api/auth/register" : "/api/auth/login";
       const body = !isRegister
-        ? { email, password }
+        ? { email, password, cloudPassword: cloudPassword?.trim() || undefined }
         : {
             email,
             nickname,
             password,
+            cloudPassword: cloudPassword?.trim(),
             phoneNumber: phoneNumber?.trim() || undefined,
             avatarColor: selectedColor,
             publicKey: keyPair?.publicKey,
@@ -2232,6 +2234,7 @@ const App: React.FC = () => {
 
       const data = await readJsonResponse(res, "Authentication failed");
       if (!res.ok) throw new Error(data.error || "Authentication failed");
+      if (data.requiresCloudPassword) return { requiresCloudPassword: true };
 
       applyAuthSession(data);
     } catch (err: any) {
@@ -2328,10 +2331,24 @@ const App: React.FC = () => {
     }
 
     if (editingMessage) {
+      let editedText = messageText;
+      const recipient = getDirectChatUser(activeChat);
+      if (E2EE_ENABLED && parseE2EEEnvelope(editingMessage.text) && recipient && recipient.publicKey && user?.publicKey) {
+        const PrivKeyE2EE = await import("./utils/e2ee");
+        const privKey = await PrivKeyE2EE.getLocalPrivateKeyAsync();
+        if (!privKey) {
+          notify("Ключ шифрования недоступен. Войдите заново на этом устройстве.", "error");
+          return;
+        }
+        const forRecipient = await PrivKeyE2EE.encryptMessage(messageText, recipient.publicKey, privKey);
+        const forSelf = await PrivKeyE2EE.encryptMessage(messageText, user.publicKey, privKey);
+        editedText = `[E2EE]${JSON.stringify({ r: forRecipient, s: forSelf })}`;
+      }
+
       if (socket.connected) {
         socket.emit("message:edit", {
           messageId: editingMessage.id,
-          text: messageText,
+          text: editedText,
         });
       }
       setMessageText("");
@@ -2480,11 +2497,27 @@ const App: React.FC = () => {
     setReplyingTo(msg);
   };
 
-  const handleEditMessage = (msg: Message) => {
-    if ((msg.text || "").startsWith("[E2EE]")) {
-      notify("Зашифрованные сообщения пока нельзя редактировать", "warning");
+  const handleEditMessage = async (msg: Message) => {
+    const encrypted = parseE2EEEnvelope(msg.text);
+    if (encrypted) {
+      const PrivKeyE2EE = await import("./utils/e2ee");
+      const privKey = await PrivKeyE2EE.getLocalPrivateKeyAsync();
+      if (!privKey || !user?.publicKey) {
+        notify("Ключ шифрования недоступен. Войдите заново на этом устройстве.", "error");
+        return;
+      }
+      const encryptedSelfCopy = encrypted.s || encrypted.r;
+      const decryptedText = await PrivKeyE2EE.decryptMessage(encryptedSelfCopy || "", user.publicKey, privKey);
+      if (!decryptedText || decryptedText.startsWith("[Старое сообщение недоступно]")) {
+        notify("Не удалось расшифровать сообщение для редактирования", "error");
+        return;
+      }
+      setEditingMessage(msg);
+      setReplyingTo(null);
+      setMessageText(decryptedText);
       return;
     }
+
     setEditingMessage(msg);
     setReplyingTo(null);
     setMessageText(msg.text || "");
@@ -2935,6 +2968,7 @@ const App: React.FC = () => {
   const savedMessagesChatItem: User | null = user && activeChat === user.id
     ? { ...user, nickname: "Избранное", status: "online" }
     : null;
+  const isSavedMessagesChat = !!user && activeChat === user.id;
   const activeChatItem = savedMessagesChatItem || [...onlineUsers, ...groups, ...channels, ...allUsers].find(
     (i) => i.id === activeChat,
   );
@@ -3132,7 +3166,7 @@ const App: React.FC = () => {
           </div>
         ) : (
           <div
-            className="chat-container active"
+            className={`chat-container active ${isSavedMessagesChat ? "saved-chat-container" : ""}`}
             style={{ position: 'relative', zIndex: 1 }}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -3199,7 +3233,11 @@ const App: React.FC = () => {
                   </span>
                 </button>
                 <div style={{ display: "flex", alignItems: "center" }}>
-                  {activeChatItem && ("isGroup" in activeChatItem || "isChannel" in activeChatItem) ? (
+                  {isSavedMessagesChat ? (
+                    <div className="saved-chat-avatar" aria-hidden="true">
+                      <Bookmark size={22} />
+                    </div>
+                  ) : activeChatItem && ("isGroup" in activeChatItem || "isChannel" in activeChatItem) ? (
                     <div
                       className="avatar avatar-hover-edit"
                       style={{
@@ -3285,17 +3323,22 @@ const App: React.FC = () => {
                   )}
                   <div
                     onClick={() => {
+                      if (isSavedMessagesChat) return;
                       setProfileItem(activeChatItem || null);
                       setShowProfile(true);
                     }}
-                    style={{ marginLeft: "12px", cursor: "pointer" }}
+                    style={{ marginLeft: "12px", cursor: isSavedMessagesChat ? "default" : "pointer" }}
                   >
                     <h2>
-                      {activeChatItem && "name" in activeChatItem
+                      {isSavedMessagesChat
+                        ? "Избранное"
+                        : activeChatItem && "name" in activeChatItem
                         ? activeChatItem.name
                         : (activeChatItem as any)?.nickname || "Unknown"}
                     </h2>
-                    {typingText ? (
+                    {isSavedMessagesChat ? (
+                      <div className="online-indicator saved-chat-subtitle">Сохранённые сообщения</div>
+                    ) : typingText ? (
                       <div className="typing-indicator">
                         <span className="typing-dots">
                           <span></span>
@@ -3502,6 +3545,11 @@ const App: React.FC = () => {
             )}
 
             <div className="messages" ref={parentRef}>
+              {isSavedMessagesChat && activeMessages.length === 0 && (
+                <div className="saved-messages-empty">
+                  Сообщений пока нет
+                </div>
+              )}
               <div
                 className="messages-virtual-canvas"
                 style={{

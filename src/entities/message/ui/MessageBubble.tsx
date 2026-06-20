@@ -14,7 +14,7 @@ interface MessageBubbleProps {
   onReact?: (msgId: string, emoji: string) => void;
   senderNameOverride?: string;
   groupCreatorId?: string;
-  onEdit?: (msg: Message) => void;
+  onEdit?: (msg: Message) => void | Promise<void>;
   onDelete?: (msg: Message) => void;
   isGroupOwner?: boolean;
   isGroupCoOwner?: boolean;

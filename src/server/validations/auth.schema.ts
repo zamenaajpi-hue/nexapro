@@ -10,6 +10,7 @@ export const registerSchema = z.object({
   email: z.string().trim().toLowerCase().email('Invalid email format'),
   nickname: z.string().min(2, 'Nickname must be at least 2 characters'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
+  cloudPassword: z.string().min(6, 'Cloud password must be at least 6 characters'),
   phoneNumber: optionalRussianPhoneSchema,
   avatarColor: z.string().optional(),
   publicKey: z.string().optional()
@@ -17,7 +18,8 @@ export const registerSchema = z.object({
 
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
-  password: z.string().min(6)
+  password: z.string().min(6),
+  cloudPassword: z.string().min(6).optional()
 });
 
 export const googleAuthSchema = z.object({

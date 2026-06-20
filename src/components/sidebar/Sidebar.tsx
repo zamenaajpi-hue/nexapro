@@ -231,6 +231,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ setShowMenuDrawer, isMobileAct
         ))}
       </div>
 
+      <div className="chat-list-heading">Чаты</div>
+
       <div className="contacts-list">
         {items.map(({ item, chatType, state, name, lastMessage, lastPost, lastActivity }) => {
           const isDirect = chatType === 'direct';

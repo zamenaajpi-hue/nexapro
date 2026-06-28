@@ -59,6 +59,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
   const ownedAvatars = useMemo(() => parseOwnedAvatars(user.ownedAvatars), [user.ownedAvatars]);
   const displayName = [firstName, lastName].filter(Boolean).join(' ') || `@${user.nickname}`;
   const previewAvatarImage = isEditing ? avatarImage : user.avatarImage;
+  const displayAvatarImage = previewAvatarImage ? resolveApiUrl(previewAvatarImage) : null;
   const previewAvatarColor = isEditing ? avatarColor : user.avatarColor;
 
   const fetchArchive = async () => {
@@ -97,7 +98,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
       formData.append('file', uploadFile, file.name);
       const data = await uploadFormDataJson<{ url?: string }>('/api/upload', formData);
       if (!data.url) throw new Error('Upload response did not include a URL');
-      setAvatarImage(data.url);
+      setAvatarImage(resolveApiUrl(data.url));
     } catch (error) {
       console.error('Failed to upload avatar:', error);
       notifyApp('Не удалось загрузить аватар');
@@ -155,7 +156,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ onClose, user, o
               onClick={() => isEditing && fileInputRef.current?.click()}
               style={{
                 backgroundColor: previewAvatarColor,
-                backgroundImage: previewAvatarImage ? `url(${previewAvatarImage})` : 'none',
+                backgroundImage: displayAvatarImage ? `url(${displayAvatarImage})` : 'none',
               }}
               title={isEditing ? 'Изменить аватар' : undefined}
               disabled={isAvatarUploading}

@@ -9,6 +9,7 @@ import {
   Paperclip,
   Mic,
   Smile,
+  CirclePlay,
   Settings,
   Plus,
   Search,
@@ -23,6 +24,7 @@ import {
   Bookmark,
   Users,
   PhoneCall,
+  ChevronRight,
   Moon,
   Sun,
   VideoOff,
@@ -73,6 +75,21 @@ type ImportedPhoneContact = {
   phones: string[];
   matchedPhone?: string | null;
   user?: User | null;
+};
+
+type SecurityOptionKey =
+  | "phoneSearch"
+  | "calls"
+  | "chatInvites"
+  | "contentPreview"
+  | "onlineStatus"
+  | "phoneVisibility";
+
+const SECURITY_CHOICES = ["everyone", "contacts", "nobody"] as const;
+const SECURITY_LABELS: Record<(typeof SECURITY_CHOICES)[number], string> = {
+  everyone: "Могут все",
+  contacts: "Контакты",
+  nobody: "Никто",
 };
 
 let sessionExpiredDispatched = false;
@@ -189,6 +206,14 @@ const readJsonResponse = async (response: Response, fallbackMessage: string) => 
 const resolveMediaUrl = (url?: string | null): string => {
   if (!url) return "";
   return url.startsWith("/") ? resolveApiUrl(url) : url;
+};
+
+const normalizeUserMedia = <T extends User | null | undefined>(item: T): T => {
+  if (!item?.avatarImage) return item;
+  return {
+    ...item,
+    avatarImage: resolveMediaUrl(item.avatarImage),
+  } as T;
 };
 
 const parseChannelAttachments = (
@@ -370,7 +395,30 @@ const App: React.FC = () => {
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [showCallsModal, setShowCallsModal] = useState(false);
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [showChannelModal, setShowChannelModal] = useState(false);
+  const [securityOptions, setSecurityOptions] = useState<Record<SecurityOptionKey, (typeof SECURITY_CHOICES)[number]>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("nexa_security_options") || "{}");
+      return {
+        phoneSearch: saved.phoneSearch || "everyone",
+        calls: saved.calls || "contacts",
+        chatInvites: saved.chatInvites || "everyone",
+        contentPreview: saved.contentPreview || "everyone",
+        onlineStatus: saved.onlineStatus || "contacts",
+        phoneVisibility: saved.phoneVisibility || "contacts",
+      };
+    } catch {
+      return {
+        phoneSearch: "everyone",
+        calls: "contacts",
+        chatInvites: "everyone",
+        contentPreview: "everyone",
+        onlineStatus: "contacts",
+        phoneVisibility: "contacts",
+      };
+    }
+  });
 
   // Theme & Appearance State
   const [activeTheme, setActiveTheme] = useState(() => localStorage.getItem("nexa_theme") || "cosmic");
@@ -390,6 +438,18 @@ const App: React.FC = () => {
       setShowContactsModal(false);
     }
   }, [showContactsEntry, showContactsModal]);
+
+  useEffect(() => {
+    localStorage.setItem("nexa_security_options", JSON.stringify(securityOptions));
+  }, [securityOptions]);
+
+  const cycleSecurityOption = (key: SecurityOptionKey) => {
+    setSecurityOptions((current) => {
+      const currentIndex = SECURITY_CHOICES.indexOf(current[key]);
+      const nextValue = SECURITY_CHOICES[(currentIndex + 1) % SECURITY_CHOICES.length];
+      return { ...current, [key]: nextValue };
+    });
+  };
 
   // Wallet and coins state
   const [walletBalance, setWalletBalance] = useState<number>(0);
@@ -500,8 +560,8 @@ const App: React.FC = () => {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const videoRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const videoRecordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const videoRecordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoRecordingPreviewRef = useRef<HTMLVideoElement | null>(null);
   const videoNoteCancelledRef = useRef(false);
@@ -541,7 +601,7 @@ const App: React.FC = () => {
   const [typingUsers, setTypingUsers] = useState<
     Record<string, Record<string, { userName: string; timestamp: number }>>
   >({});
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCurrentlyTypingRef = useRef<boolean>(false);
 
   // WebRTC VoIP VoIP/Videocall references and states
@@ -667,8 +727,16 @@ const App: React.FC = () => {
       const audio = new Audio();
       audio.id = 'remote-audio';
       audio.autoplay = true;
+      audio.muted = false;
       audio.volume = 1.0;
-      audio.style.display = 'none';
+      audio.setAttribute('playsinline', 'true');
+      audio.style.position = 'fixed';
+      audio.style.left = '0';
+      audio.style.bottom = '0';
+      audio.style.width = '1px';
+      audio.style.height = '1px';
+      audio.style.opacity = '0';
+      audio.style.pointerEvents = 'none';
       document.body.appendChild(audio);
       remoteAudioRef.current = audio;
       console.log('[Init] Created remote audio element:', audio);
@@ -748,9 +816,12 @@ const App: React.FC = () => {
         if (audioTracks.length > 0) {
           if (remoteAudioRef.current) {
             remoteAudioRef.current.srcObject = event.streams[0];
+            remoteAudioRef.current.muted = false;
             remoteAudioRef.current.volume = 1.0;
+            remoteAudioRef.current.setAttribute('playsinline', 'true');
             
             // Force play
+            void callSounds.initialize();
             remoteAudioRef.current.play()
               .then(() => console.log('[WebRTC] Audio playing'))
               .catch(err => {
@@ -858,14 +929,23 @@ const App: React.FC = () => {
       if (!audio) {
         audio = new Audio();
         audio.autoplay = true;
+        audio.muted = false;
         audio.volume = 1;
-        audio.style.display = "none";
+        audio.setAttribute("playsinline", "true");
+        audio.style.position = "fixed";
+        audio.style.left = "0";
+        audio.style.bottom = "0";
+        audio.style.width = "1px";
+        audio.style.height = "1px";
+        audio.style.opacity = "0";
+        audio.style.pointerEvents = "none";
         audio.dataset.groupCallPeer = peerId;
         document.body.appendChild(audio);
         groupRemoteAudioRefs.current.set(peerId, audio);
       }
 
       audio.srcObject = event.streams[0];
+      void callSounds.initialize();
       audio.play().catch((error) => {
         console.warn("[GroupCall] Remote audio playback was delayed:", error);
       });
@@ -1213,10 +1293,11 @@ const App: React.FC = () => {
   };
 
   // Calling handlers
-  const handleInitiateCall = async (type: "audio" | "video") => {
-    if (!activeChat) return;
+  const handleInitiateCall = async (type: "audio" | "video", targetUser?: User) => {
+    const targetChatId = targetUser?.id || activeChat;
+    if (!targetChatId) return;
     const partner =
-      activeChat === user?.id ? null : getDirectChatUser(activeChat);
+      targetUser || (targetChatId === user?.id ? null : getDirectChatUser(targetChatId));
     if (!partner) return;
 
     try {
@@ -1256,7 +1337,7 @@ const App: React.FC = () => {
         isVideoOff: false,
       });
 
-      socket.emit("call:initiate", { to: activeChat, type });
+      socket.emit("call:initiate", { to: targetChatId, type });
       // Play notification beep
       callSounds.playNotificationBeep();
 
@@ -1462,7 +1543,9 @@ const App: React.FC = () => {
 
       if (cancelled || !savedUser) return;
       void import("./store/localDB").then((db) => db.setLocalDBUser(savedUser.id));
-      setUser(savedUser);
+      const normalizedSavedUser = normalizeUserMedia(savedUser);
+      setUser(normalizedSavedUser);
+      if (normalizedSavedUser !== savedUser) updateStoredUser(normalizedSavedUser);
       connectSocket(savedToken || undefined);
     };
 
@@ -1751,8 +1834,9 @@ const App: React.FC = () => {
 
     socket.on("profile:updated", (updatedUser: User) => {
       if (user && updatedUser.id === user.id) {
-        setUser(updatedUser);
-        updateStoredUser(updatedUser);
+        const normalizedUser = normalizeUserMedia(updatedUser);
+        setUser(normalizedUser);
+        updateStoredUser(normalizedUser);
       }
     });
 
@@ -2175,7 +2259,8 @@ const App: React.FC = () => {
   const applyAuthSession = (data: { token: string; user: User }) => {
     const previousUserId = getStoredUser()?.id || null;
 
-    storeAuthSession(data);
+    const normalizedUser = normalizeUserMedia(data.user);
+    storeAuthSession({ ...data, user: normalizedUser });
     sessionExpiredDispatched = false;
     setSessionMessage(null);
 
@@ -2186,7 +2271,7 @@ const App: React.FC = () => {
       db.setLocalDBUser(data.user.id);
     });
     useChatStore.setState({ chats: {}, channelPosts: {}, chatStates: {}, activeChat: null });
-    setUser(data.user);
+    setUser(normalizedUser);
     connectSocket(data.token);
   };
 
@@ -3934,23 +4019,24 @@ const App: React.FC = () => {
                     />
                     <button
                       type="button"
+                      className="composer-tool-btn"
                       title="Прикрепить"
                       onClick={() => fileInputRef.current?.click()}
                     >
-                      <Paperclip size={20} />
+                      <Paperclip size={28} />
                     </button>
                     <button
                       type="button"
                       title="Смайлики"
-                      className={showEmojiPicker ? "active" : ""}
+                      className={`composer-tool-btn ${showEmojiPicker ? "active" : ""}`}
                       onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                     >
-                      <Smile size={20} />
+                      <Smile size={28} />
                     </button>
                     <input
                       type="text"
                       placeholder={
-                        isRecording || isVideoRecording ? "Идет запись..." : "Введите сообщение..."
+                        isRecording || isVideoRecording ? "Идет запись..." : "Сообщение"
                       }
                       value={messageText}
                       onChange={(e) => setMessageText(e.target.value)}
@@ -3961,24 +4047,24 @@ const App: React.FC = () => {
                         <Send size={18} />
                       </button>
                     ) : (
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <>
                         <button
                           type="button"
-                          className={`voice-btn ${isVideoRecording ? "recording" : ""}`}
+                          className={`composer-tool-btn voice-btn ${isVideoRecording ? "recording" : ""}`}
                           onClick={isVideoRecording ? stopVideoNoteRecording : startVideoNoteRecording}
                           title="Видео сообщение"
                         >
-                          <Video size={18} />
+                          <CirclePlay size={28} />
                         </button>
                         <button
                           type="button"
-                          className={`voice-btn ${isRecording ? "recording" : ""}`}
+                          className={`composer-tool-btn voice-btn ${isRecording ? "recording" : ""}`}
                           onClick={isRecording ? stopRecording : startRecording}
                           title="Голосовое сообщение"
                         >
-                          <Mic size={18} />
+                          <Mic size={28} />
                         </button>
-                      </div>
+                      </>
                     )}
                   </form>
                 );
@@ -4020,6 +4106,20 @@ const App: React.FC = () => {
             onlineUsers={onlineUsers}
             socket={socket}
             currentUser={user}
+            messages={
+              !("members" in profileItem)
+                ? (profileItem.id === activeChat ? activeMessages : chats[profileItem.id]?.messages || [])
+                : []
+            }
+            onOpenChat={(chatId) => {
+              setActiveChat(chatId);
+              setShowProfile(false);
+            }}
+            onStartCall={(target, type) => {
+              setActiveChat(target.id);
+              setShowProfile(false);
+              void handleInitiateCall(type, target);
+            }}
           />
         </Suspense>
       )}
@@ -4111,6 +4211,20 @@ const App: React.FC = () => {
             </div>
 
             {/* Внешний вид */}
+            <div
+              className="menu-drawer-item"
+              onClick={() => {
+                setShowMenuDrawer(false);
+                setShowSecurityModal(true);
+              }}
+            >
+              <div className="menu-drawer-item-left">
+                <Lock size={18} className="menu-drawer-item-icon" />
+                <span>Безопасность</span>
+              </div>
+              <ChevronRight size={16} className="menu-drawer-chevron" />
+            </div>
+
             <div className="menu-drawer-item" style={{ flexDirection: 'column', alignItems: 'flex-start', padding: '12px 20px', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Внешний вид</span>
@@ -4330,7 +4444,7 @@ const App: React.FC = () => {
               </label>
             </div>
             <div className="menu-drawer-version">
-              Nexa Android Версия 1.0 Beta Test
+              Nexa PC Версия 1.0 Beta Test
             </div>
           </div>
         </div>
@@ -4851,6 +4965,71 @@ const App: React.FC = () => {
          CALLS LOG DETAILS OVERLAY
          ========================================================================== */}
       {showCallsModal && (
+        <div className="modal active calls-modal-backdrop" onClick={() => setShowCallsModal(false)}>
+          <div className="modal-content calls-panel" onClick={(e) => e.stopPropagation()}>
+            <button className="calls-close-button" type="button" onClick={() => setShowCallsModal(false)} aria-label="Закрыть">
+              <X size={18} />
+            </button>
+            <div className="calls-panel-header">
+              <h3>Звонки</h3>
+              <p>История входящих и исходящих вызовов</p>
+            </div>
+            <div className="calls-tabs">
+              <button type="button" className="calls-tab active">Все</button>
+            </div>
+            <div className="calls-list">
+              {callLogs.length === 0 ? (
+                <div className="calls-empty-state">
+                  <PhoneCall size={28} />
+                  <span>Звонков пока нет</span>
+                </div>
+              ) : (
+                callLogs.map((log) => {
+                  const matchedUser = [...onlineUsers, ...allUsers].find((item) => item.nickname === log.name);
+                  const statusLabel =
+                    log.status === "incoming"
+                      ? "Входящий"
+                      : log.status === "missed"
+                        ? "Пропущенный"
+                        : "Отменённый";
+                  const accentClass =
+                    log.status === "incoming"
+                      ? "incoming"
+                      : log.status === "missed"
+                        ? "missed"
+                        : "outgoing";
+
+                  return (
+                    <div className="calls-row" key={log.id}>
+                      <div
+                        className="calls-avatar"
+                        style={{
+                          backgroundColor: matchedUser?.avatarColor || "#14d89c",
+                          backgroundImage: matchedUser?.avatarImage ? `url(${matchedUser.avatarImage})` : "none",
+                        }}
+                      >
+                        {!matchedUser?.avatarImage && (matchedUser?.initials || getInitials(log.name))}
+                        <span className={`calls-presence ${onlineUsers.some((item) => item.nickname === log.name) ? "online" : ""}`} />
+                      </div>
+                      <div className="calls-row-main">
+                        <strong>{log.name}</strong>
+                        <span className={`calls-status ${accentClass}`}>
+                          <PhoneCall size={13} />
+                          {statusLabel}
+                          <small>{log.type === "video" ? "Видео" : "Аудио"}</small>
+                        </span>
+                      </div>
+                      <div className="calls-row-time">{log.time.replace(/^.*?,\s*/, "")}</div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {false && showCallsModal && (
         <div className="modal active" onClick={() => setShowCallsModal(false)}>
           <div
             className="modal-content"
@@ -4952,6 +5131,68 @@ const App: React.FC = () => {
       {/* ==========================================================================
          CHANNEL CREATOR MODAL
          ========================================================================== */}
+      {showSecurityModal && (
+        <div className="modal active security-modal-backdrop" onClick={() => setShowSecurityModal(false)}>
+          <div className="modal-content security-panel" onClick={(e) => e.stopPropagation()}>
+            <header className="security-panel-header">
+              <div>
+                <h3>Безопасность</h3>
+                <p>Управление приватностью профиля и входящими действиями</p>
+              </div>
+              <button className="close-modal" type="button" onClick={() => setShowSecurityModal(false)} aria-label="Закрыть">
+                <X size={20} />
+              </button>
+            </header>
+
+            <div className="security-panel-body">
+              <section className="security-section">
+                <h4>Доступ</h4>
+                {[
+                  ["phoneSearch", "Найти меня по номеру"],
+                  ["calls", "Позвонить"],
+                  ["chatInvites", "Пригласить в чат"],
+                  ["contentPreview", "Показывать контент"],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className="security-row"
+                    onClick={() => cycleSecurityOption(key as SecurityOptionKey)}
+                  >
+                    <span>{label}</span>
+                    <strong>
+                      {SECURITY_LABELS[securityOptions[key as SecurityOptionKey]]}
+                      <ChevronRight size={16} />
+                    </strong>
+                  </button>
+                ))}
+              </section>
+
+              <section className="security-section">
+                <h4>Информация</h4>
+                {[
+                  ["onlineStatus", "Видеть статус «в сети»"],
+                  ["phoneVisibility", "Видеть мой номер"],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className="security-row"
+                    onClick={() => cycleSecurityOption(key as SecurityOptionKey)}
+                  >
+                    <span>{label}</span>
+                    <strong>
+                      {SECURITY_LABELS[securityOptions[key as SecurityOptionKey]]}
+                      <ChevronRight size={16} />
+                    </strong>
+                  </button>
+                ))}
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showChannelModal && (
         <Suspense fallback={null}>
           <CreateChannelModal

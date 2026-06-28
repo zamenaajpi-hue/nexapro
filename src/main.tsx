@@ -30,10 +30,12 @@ if (typeof window !== 'undefined') {
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 import App from './App.tsx';
 import './index.css';
 import { isNativeAndroidApp, isNativeCapacitorApp } from './utils/platform';
+
+const isElectronRenderer = typeof window !== 'undefined' && Boolean((window as any).electron?.isElectron);
 
 try {
   const rootElement = document.getElementById('root');
@@ -43,19 +45,19 @@ try {
 
   document.documentElement.classList.toggle('platform-native', isNativeCapacitorApp());
   document.documentElement.classList.toggle('platform-android', isNativeAndroidApp());
+  const Router = isElectronRenderer ? HashRouter : BrowserRouter;
 
   createRoot(rootElement).render(
     <StrictMode>
-      <BrowserRouter>
+      <Router>
         <App />
-      </BrowserRouter>
+      </Router>
     </StrictMode>,
   );
 } catch (error) {
   console.error('[INIT ERROR]', error);
 }
 
-const isElectronRenderer = typeof window !== 'undefined' && Boolean((window as any).electron?.isElectron);
 const isNativeApp = typeof window !== 'undefined' && isNativeCapacitorApp();
 
 if ('serviceWorker' in navigator && !isElectronRenderer && !isNativeApp) {

@@ -94,7 +94,11 @@ export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<st
   };
 
   socket.on('call:initiate', (payload: any) => {
-    const { to, type } = payload;
+    const { to, type } = payload || {};
+    if (typeof to !== 'string' || (type !== 'audio' && type !== 'video')) {
+      socket.emit('call:error', { error: 'Invalid call request' });
+      return;
+    }
     const sender = onlineUsers.get(userId);
     const callerName = sender?.nickname || sender?.username || 'Nexa';
 
@@ -102,6 +106,7 @@ export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<st
       const recipientSocket = onlineUsers.get(to)?.socketId;
       if (recipientSocket) {
         io.to(recipientSocket).emit('call:incoming', { from: safeCallUserPayload(sender), type });
+        socket.emit('call:ringing', { to, type });
       } else {
         void sendPushToUser(to, {
           title: `@${callerName} звонит`,
@@ -111,6 +116,7 @@ export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<st
           fromName: callerName,
           url: '/',
         });
+        socket.emit('call:unavailable', { to });
       }
     }
   });
@@ -136,7 +142,7 @@ export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<st
   socket.on('call:end', (payload: any) => {
     const { to } = payload;
     const recipientSocket = onlineUsers.get(to)?.socketId;
-    if (recipientSocket) io.to(recipientSocket).emit('call:ended');
+    if (recipientSocket) io.to(recipientSocket).emit('call:ended', { fromId: userId });
   });
 
   socket.on('group-call:join', async (payload: any) => {

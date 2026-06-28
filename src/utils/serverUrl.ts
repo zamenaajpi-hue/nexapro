@@ -4,10 +4,25 @@ export const DEFAULT_SERVER_URL = 'http://64.188.67.71:3000';
 
 const cleanUrl = (url: string): string => url.trim().replace(/\/$/, '');
 
+const readServerUrlFromLocation = (): string | null => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const queryUrl = params.get('serverUrl') || params.get('server_url');
+    return queryUrl ? cleanUrl(queryUrl) : null;
+  } catch {
+    return null;
+  }
+};
+
 export const readStoredServerUrl = (): string => {
   if (typeof window === 'undefined') return DEFAULT_SERVER_URL;
 
   try {
+    const locationUrl = readServerUrlFromLocation();
+    if (locationUrl) return locationUrl;
+
     const primary = localStorage.getItem(PRIMARY_STORAGE_KEY);
     if (primary) return cleanUrl(primary);
 

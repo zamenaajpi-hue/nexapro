@@ -109,7 +109,7 @@ export const authService = {
     const normalizedPhone = normalizeRussianPhone(data.phoneNumber);
     if (normalizedPhone) {
       const existingPhone = await userRepository.findByNormalizedPhone(normalizedPhone);
-      if (existingPhone) throw new Error('Этот номер телефона уже привязан к другому аккаунту');
+      if (existingPhone) throw new Error('Этот номер телефона уже привязан к другому аккаунту NEXA');
     }
 
     const passwordHash = await bcrypt.hash(data.password, 10);

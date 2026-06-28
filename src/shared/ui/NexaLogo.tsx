@@ -1,4 +1,5 @@
 import React from 'react';
+import nexaLogoUrl from '../../assets/nexa-logo.svg';
 
 type NexaLogoProps = {
   className?: string;
@@ -23,7 +24,7 @@ export const NexaLogo = ({
       className="logo-icon nexa-logo-mark"
       style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }}
     >
-      <img src="/nexa-logo.svg" alt="Nexa Messenger" />
+      <img src={nexaLogoUrl} alt="" aria-hidden="true" />
     </div>
     {showText && (
       <div className="brand nexa-logo-wordmark">

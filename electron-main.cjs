@@ -5,6 +5,7 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const { dialog } = require('electron');
+const { pathToFileURL } = require('url');
 
 let mainWindow;
 let tray;
@@ -16,6 +17,33 @@ const DESKTOP_SERVER_PORT = Number(process.env.NEXA_DESKTOP_PORT || 47832);
 const MEDIA_PERMISSIONS = new Set(['media', 'microphone', 'camera']);
 const mediaPermissionDecisions = new Map();
 const DEFAULT_REMOTE_SERVER_URL = process.env.NEXA_DEFAULT_SERVER_URL || 'http://64.188.67.71:3000';
+
+function getDesktopMainLogPath() {
+  try {
+    return path.join(app.getPath('userData'), 'desktop-main.log');
+  } catch {
+    return path.join(__dirname, 'desktop-main.log');
+  }
+}
+
+function logMainEvent(message, error) {
+  const details = error ? ` ${error.stack || error}` : '';
+  const line = `[${new Date().toISOString()}] ${message}${details}\n`;
+  try {
+    fs.appendFileSync(getDesktopMainLogPath(), line);
+  } catch {
+    // Logging must never break desktop startup.
+  }
+  console.log(line.trim());
+}
+
+process.on('uncaughtException', (error) => {
+  logMainEvent('Uncaught exception:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  logMainEvent('Unhandled rejection:', error);
+});
 
 // Config file path for persistent settings
 function getConfigPath() {
@@ -61,6 +89,15 @@ function getPackagedDistPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar', 'dist')
     : path.join(__dirname, 'dist');
+}
+
+function getPackagedUiUrl(serverUrl) {
+  const indexPath = path.join(getPackagedDistPath(), 'index.html');
+  const uiUrl = pathToFileURL(indexPath);
+  if (serverUrl) {
+    uiUrl.searchParams.set('serverUrl', serverUrl);
+  }
+  return uiUrl;
 }
 
 function getPackagedServerPath() {
@@ -288,17 +325,25 @@ function testServerConnection(urlToTest) {
 // Sleek cyan message bubble icon as an embedded 32x32 PNG fallback for robust performance across all OS platforms
 const EMBEDDED_ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAsTAAALEwEAmpwYAAAByklEQVRYR+2WwUpDMRCGp8XehbvsK9SFrqXgA0R8gh7Fp3AnXbiXgqAIXbvyAn0An6CIouAnqFvBvYIuFf8Z0pI0bZObm6SDoX8IDGfS+fJnMr80vby8vLy8vPwPr6X2FhFr6nMyKGeDWeVd21D/BfQA8wM6AnrSgB+gUat/DpwAL8A7cALcm1hG0iHwBNyrXFkZpG/TzBvAtYlmAEx7Hn9u3gIuDYA/pZ2G6vX6IHAAnHeorX9V4gE21OfpWrcbAL6AmSbeZq4pBscvC8gAnIuY521NnU/O05p8E/Eon7v2M5C/S/tD+6oD7GpiY6u7Zcoq4gO98D6mGgV7AtgDDoCWehdwO3R/0L4BzoArZc0D+D2S637fAvY90R9FvDcoZ4R4eRzI4yG9O77Z5E69ItoR6Z0B79bE3DkG0H7bE+1OvevC7f8ArN0H/pY0LAnV9G0O5bXgO92rSNoHToFvXb6R3mB9fR0ZUPt+F8B9C67SvsvefP1O6WfcgM4An39N7d81gH3Gg0q9Wp+y/i3w0L6SvsfeP6n9m9KPsPZtAsCWehe/f0Lp+0Sgq2P7p8vLy8vLy8vLP/IG/m9/AdB9TbeF29U3AAAAAElFTkSuQmCC';
 
-// Safe icon generator which handles any file missing or unsupported gracefully (e.g. SVG on Windows)
+// Safe icon generator which handles any file missing or unsupported gracefully.
 function getAppIcon() {
-  try {
-    const iconPath = path.join(__dirname, 'public', 'nexa-logo.svg');
-    const img = nativeImage.createFromPath(iconPath);
-    if (img && !img.isEmpty()) {
-      return img;
+  const iconCandidates = [
+    app.isPackaged ? path.join(process.resourcesPath, 'build', 'nexa-logo.ico') : null,
+    path.join(__dirname, 'build', 'nexa-logo.ico'),
+    path.join(__dirname, 'public', 'nexa-logo.svg'),
+  ].filter(Boolean);
+
+  for (const iconPath of iconCandidates) {
+    try {
+      const img = nativeImage.createFromPath(iconPath);
+      if (img && !img.isEmpty()) {
+        return img;
+      }
+    } catch (err) {
+      console.warn('Failed to load app icon candidate:', iconPath, err);
     }
-  } catch (err) {
-    console.warn('Failed to load local icon file, using embedded fallback:', err);
   }
+
   return nativeImage.createFromDataURL(EMBEDDED_ICON_BASE64);
 }
 
@@ -374,6 +419,8 @@ async function findActiveServerUrl() {
 }
 
 async function createMainWindow() {
+  logMainEvent(`Creating main window. packaged=${app.isPackaged} dirname=${__dirname} resources=${process.resourcesPath || ''}`);
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -393,20 +440,85 @@ async function createMainWindow() {
   // Setup IPC Handlers before loading any page
   setupIpcHandlers();
 
-  // Load appropriate URL or locally fallback
-  const activeUrl = await findActiveServerUrl();
-  if (activeUrl) {
-    console.log(`Connecting Nexa to active server: ${activeUrl}`);
-    mainWindow.loadURL(activeUrl);
+  const showMainWindow = (reason) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    logMainEvent(`Showing main window: ${reason}`);
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  };
+
+  const startupRevealTimer = setTimeout(() => {
+    showMainWindow('startup fallback timer');
+  }, 4500);
+
+  const clearStartupRevealTimer = () => {
+    clearTimeout(startupRevealTimer);
+  };
+
+  mainWindow.once('ready-to-show', () => {
+    clearStartupRevealTimer();
+    showMainWindow('ready-to-show');
+  });
+
+  mainWindow.webContents.once('did-finish-load', () => {
+    clearStartupRevealTimer();
+    showMainWindow('did-finish-load');
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    logMainEvent(`Renderer failed to load ${validatedURL}: ${errorCode} ${errorDescription}`);
+    showMainWindow('did-fail-load');
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    logMainEvent(`Renderer process gone: ${JSON.stringify(details)}`);
+    showMainWindow('render-process-gone');
+  });
+
+  mainWindow.on('unresponsive', () => {
+    logMainEvent('Main window became unresponsive');
+    showMainWindow('unresponsive');
+  });
+
+  let urlToLoad = '';
+
+  // Packaged desktop must load the bundled UI, not a remote web page. The UI talks to the configured backend via API.
+  if (app.isPackaged) {
+    const activeUrl = await findActiveServerUrl();
+    if (activeUrl) saveServerUrl(activeUrl);
+    const uiUrl = getPackagedUiUrl(activeUrl);
+    urlToLoad = uiUrl.toString();
+    logMainEvent(`Loading bundled Nexa desktop UI: ${urlToLoad}`);
   } else {
-    console.log('No active servers found. Loading default Nexa URL...');
-    mainWindow.loadURL('http://localhost:3000');
+    const activeUrl = await findActiveServerUrl();
+    if (activeUrl) {
+      logMainEvent(`Connecting Nexa to active server: ${activeUrl}`);
+      urlToLoad = activeUrl;
+    } else {
+      logMainEvent('No active servers found. Loading default Nexa URL...');
+      urlToLoad = 'http://localhost:3000';
+    }
   }
 
-  // Show window when content is loaded
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-  });
+  try {
+    await mainWindow.loadURL(urlToLoad);
+  } catch (error) {
+    logMainEvent(`loadURL failed for ${urlToLoad}:`, error);
+    const fallbackHtml = encodeURIComponent(`
+      <html>
+        <body style="margin:0;background:#071323;color:white;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center">
+          <div>
+            <h2>NEXA Messenger</h2>
+            <p>Не удалось открыть интерфейс приложения.</p>
+            <p style="color:#89a">Подробности записаны в desktop-main.log.</p>
+          </div>
+        </body>
+      </html>
+    `);
+    await mainWindow.loadURL(`data:text/html;charset=utf-8,${fallbackHtml}`);
+    showMainWindow('fallback error page');
+  }
 
   // Handle link clicking to open in external browser, while keeping Google OAuth popups attached to Nexa.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -437,13 +549,8 @@ async function createMainWindow() {
     return { action: 'deny' };
   });
 
-  // Instead of closing, minimize to system tray (unless quitting the app)
-  mainWindow.on('close', (event) => {
-    if (!isQuitting) {
-      event.preventDefault();
-      mainWindow.hide();
-    }
-    return false;
+  mainWindow.on('close', () => {
+    isQuitting = true;
   });
 
   mainWindow.on('closed', () => {
@@ -521,7 +628,11 @@ function setupIpcHandlers() {
     const normalizedUrl = url.trim().replace(/\/$/, '');
     saveServerUrl(normalizedUrl);
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadURL(normalizedUrl);
+      if (app.isPackaged) {
+        mainWindow.loadURL(getPackagedUiUrl(normalizedUrl).toString());
+      } else {
+        mainWindow.loadURL(normalizedUrl);
+      }
     }
     return true;
   });
@@ -615,6 +726,9 @@ function isTrustedMediaPermissionRequest(webContents, details) {
   try {
     const currentUrl = new URL(webContents.getURL());
     const requestOrigin = getPermissionRequestOrigin(webContents, details);
+    if (app.isPackaged && currentUrl.protocol === 'file:') {
+      return true;
+    }
     return Boolean(
       requestOrigin &&
       ['http:', 'https:'].includes(currentUrl.protocol) &&
@@ -626,7 +740,7 @@ function isTrustedMediaPermissionRequest(webContents, details) {
 }
 
 async function confirmMediaPermission(webContents, permission, details) {
-  const origin = getPermissionRequestOrigin(webContents, details);
+  const origin = getPermissionRequestOrigin(webContents, details) || (app.isPackaged ? 'nexa-desktop' : null);
   if (!origin || !isTrustedMediaPermissionRequest(webContents, details)) {
     console.warn(`[Electron] Permission denied from untrusted context: ${permission}`);
     return false;
@@ -657,6 +771,7 @@ async function confirmMediaPermission(webContents, permission, details) {
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
+  logMainEvent('Single instance lock is already held. Quitting this instance.');
   app.quit();
 } else {
   app.on('second-instance', () => {
@@ -667,7 +782,8 @@ if (!gotTheLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    logMainEvent(`App ready. argv=${JSON.stringify(process.argv)}`);
     // Ask before granting camera/microphone access and only trust the active Nexa window origin.
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
       if (!MEDIA_PERMISSIONS.has(permission)) {
@@ -684,7 +800,7 @@ if (!gotTheLock) {
         });
     });
 
-    createMainWindow();
+    await createMainWindow();
     createTray();
     setAppMenu();
     session.defaultSession.clearStorageData({
@@ -698,6 +814,9 @@ if (!gotTheLock) {
         createMainWindow();
       }
     });
+  }).catch((error) => {
+    logMainEvent('App startup failed:', error);
+    app.quit();
   });
 }
 

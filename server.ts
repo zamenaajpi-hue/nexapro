@@ -23,6 +23,8 @@ import { setupSocketHandlers } from './src/server/socket';
 import { storyController } from './src/server/stories/story.controller';
 import { profileViewUserDto, safeUser } from './src/server/utils/safeUser';
 import { extensionFromMime, hasExpectedFileSignature, isAllowedUploadMime } from './src/server/utils/fileValidation';
+import { registerBlockRoutes } from './src/server/blocks/block.routes';
+import { registerPublicLinkRoutes } from './src/server/publicLinks/publicLink.routes';
 
 const normalizePhone = (phone?: string | null) => {
   const digits = (phone || '').replace(/\D/g, '');
@@ -33,6 +35,8 @@ const normalizePhone = (phone?: string | null) => {
 
 async function startServer() {
   const app = express();
+  const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB) || 50;
+  const JSON_UPLOAD_LIMIT_MB = Math.ceil(MAX_FILE_SIZE_MB * 1.5) + 2;
   
   // Setup Logger
   const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -97,7 +101,7 @@ async function startServer() {
     res.end(await client.register.metrics());
   });
 
-  app.use(express.json());
+  app.use(express.json({ limit: `${JSON_UPLOAD_LIMIT_MB}mb` }));
 
   // --- CORS Middleware for API routes ---
   const allowedOrigins = (process.env.CORS_ORIGIN || '')
@@ -186,7 +190,6 @@ async function startServer() {
     }
   });
 
-  const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB) || 50;
   const upload = multer({ 
     storage,
     limits: { fileSize: MAX_FILE_SIZE_MB * 1024 * 1024 },
@@ -196,8 +199,11 @@ async function startServer() {
   });
 
   app.use('/uploads', express.static(uploadDir, {
+    maxAge: '7d',
+    immutable: true,
     setHeaders: (res) => {
       res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
       res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'none'; script-src 'none'; sandbox");
     }
   }));
@@ -245,17 +251,70 @@ async function startServer() {
     }
   });
 
+  app.post('/api/upload/base64', authenticateUser, async (req: any, res: any) => {
+    let filePath = '';
+    try {
+      const { data, name, type } = req.body || {};
+      if (!data || typeof data !== 'string') return res.status(400).json({ error: 'No file uploaded' });
+      if (!isAllowedUploadMime(type)) return res.status(400).json({ error: 'Upload type is not allowed' });
+
+      const base64 = data.includes(',') ? data.slice(data.indexOf(',') + 1) : data;
+      const buffer = Buffer.from(base64, 'base64');
+      const maxBytes = MAX_FILE_SIZE_MB * 1024 * 1024;
+      if (!buffer.length) return res.status(400).json({ error: 'No file uploaded' });
+      if (buffer.length > maxBytes) {
+        return res.status(413).json({ error: `File is too large. Maximum size is ${MAX_FILE_SIZE_MB} MB.` });
+      }
+
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      const fileName = uniqueSuffix + extensionFromMime(type);
+      const originalName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 180) : fileName;
+      filePath = path.join(uploadDir, fileName);
+      await fs.promises.writeFile(filePath, buffer);
+
+      if (!hasExpectedFileSignature(filePath, type)) {
+        fs.unlink(filePath, () => {});
+        return res.status(400).json({ error: 'File content does not match its declared type' });
+      }
+
+      const url = `/uploads/${fileName}`;
+      const { db } = await import('./src/services/db');
+      const file = await db.uploadedFile.create({
+        data: {
+          userId: req.userId,
+          fileName,
+          originalName,
+          mimeType: type,
+          size: buffer.length,
+          url,
+        },
+      });
+      res.json({ fileId: file.id, url, type, name: originalName });
+    } catch (err: any) {
+      if (filePath) fs.unlink(filePath, () => {});
+      res.status(500).json({ error: err.message || 'Upload failed' });
+    }
+  });
+
   // --- Auth Routes ---
-  const authRateLimit = rateLimit({
+  const loginRateLimit = rateLimit({
     windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
     max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 10,
-    message: { error: 'Too many attempts' },
+    message: { error: 'Too many login attempts' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+  });
+  const registrationRateLimit = rateLimit({
+    windowMs: Number(process.env.REGISTRATION_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000,
+    max: Number(process.env.REGISTRATION_RATE_LIMIT_MAX) || 5,
+    message: { error: 'Too many registration attempts' },
     standardHeaders: true,
     legacyHeaders: false,
   });
-  app.post('/api/auth/register', authRateLimit, authController.register);
-  app.post('/api/auth/login', authRateLimit, authController.login);
-  app.post('/api/auth/google', authRateLimit, authController.google);
+  app.post('/api/auth/register', registrationRateLimit, authController.register);
+  app.post('/api/auth/login', loginRateLimit, authController.login);
+  app.post('/api/auth/google', loginRateLimit, authController.google);
 
   // --- Users Routes ---
   app.get('/api/users', authenticateUser, async (req: any, res) => {
@@ -364,6 +423,9 @@ async function startServer() {
       res.status(500).json({ error: 'Failed to match phone contacts' });
     }
   });
+
+  registerBlockRoutes(app);
+  registerPublicLinkRoutes(app);
 
   // --- Push Notification Token Routes ---
   app.post('/api/push/register', authenticateUser, pushController.registerToken);

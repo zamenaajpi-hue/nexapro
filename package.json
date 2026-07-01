@@ -1,7 +1,7 @@
 {
   "name": "nexa-messenger",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.6",
   "type": "module",
   "main": "electron-main.cjs",
   "scripts": {
@@ -22,6 +22,7 @@
     "db:studio": "npx prisma studio",
     "desktop": "npx electron .",
     "desktop:build": "npx electron-builder",
+    "desktop:build:signed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-signed-windows.ps1",
     "android:add": "npx cap add android",
     "android:sync": "npx cap sync && node scripts/prune-android-assets.cjs",
     "android:open": "npx cap open android",
@@ -123,6 +124,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "build/nexa-logo.ico",
+        "to": "build/nexa-logo.ico"
+      },
       {
         "from": "node_modules/@prisma/client",
         "to": "node_modules/@prisma/client"

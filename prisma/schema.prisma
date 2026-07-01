@@ -8,51 +8,54 @@ datasource db {
 }
 
 model User {
-  id             String        @id @default(uuid())
-  email          String?       @unique
-  googleSub      String?       @unique
-  phoneNumber    String?
-  emailVisibility String       @default("PRIVATE")
-  phoneVisibility String       @default("PRIVATE")
-  normalizedPhone String?      @unique
-  nickname       String        @unique
-  nexaId         String?       @unique
-  passwordHash   String?
+  id                String          @id @default(uuid())
+  email             String?         @unique
+  googleSub         String?         @unique
+  phoneNumber       String?
+  emailVisibility   String          @default("PRIVATE")
+  phoneVisibility   String          @default("PRIVATE")
+  normalizedPhone   String?         @unique
+  nickname          String          @unique
+  nexaId            String?         @unique
+  passwordHash      String?
   cloudPasswordHash String?
-  avatarColor    String
-  avatarImage    String?
-  initials       String?
-  publicKey      String?
-  bio            String?
-  firstName      String?
-  lastName       String?
-  dateOfBirth    String?
-  activityStatus String?
-  role           String        @default("user")
-  balance        Float         @default(0)
-  ownedAvatars   String        @default("[]")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  messagesSent   Message[]     @relation("SentMessages")
-  groupsJoined   GroupMember[]
-  groupsCreated  Group[]       @relation("CreatedGroups")
-  reactions      Reaction[]
-  pushTokens     PushToken[]
-  stories        Story[]         @relation("UserStories")
-  storyViews     StoryView[]     @relation("UserStoryViews")
-  storyReactions StoryReaction[] @relation("UserStoryReactions")
-  
-  createdChannels Channel[]       @relation("CreatedChannels")
-  channelMembers  ChannelMember[]
-  channelPosts    ChannelPost[]
+  avatarColor       String
+  avatarImage       String?
+  initials          String?
+  publicKey         String?
+  bio               String?
+  firstName         String?
+  lastName          String?
+  dateOfBirth       String?
+  activityStatus    String?
+  role              String          @default("user")
+  balance           Float           @default(0)
+  ownedAvatars      String          @default("[]")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  messagesSent      Message[]       @relation("SentMessages")
+  groupsJoined      GroupMember[]
+  groupsCreated     Group[]         @relation("CreatedGroups")
+  reactions         Reaction[]
+  pushTokens        PushToken[]
+  stories           Story[]         @relation("UserStories")
+  storyViews        StoryView[]     @relation("UserStoryViews")
+  storyReactions    StoryReaction[] @relation("UserStoryReactions")
+
+  createdChannels  Channel[]         @relation("CreatedChannels")
+  channelMembers   ChannelMember[]
+  channelPosts     ChannelPost[]
   channelReactions ChannelReaction[]
-  channelComments ChannelComment[]
+  channelComments  ChannelComment[]
   channelPostViews ChannelPostView[]
-  chatStates      ChatState[]
-  messageReceipts MessageReceipt[]
-  createdPolls    Poll[]          @relation("CreatedPolls")
-  savedMessages   SavedMessage[]
-  uploadedFiles   UploadedFile[]
+  chatStates       ChatState[]
+  messageReceipts  MessageReceipt[]
+  createdPolls     Poll[]            @relation("CreatedPolls")
+  savedMessages    SavedMessage[]
+  uploadedFiles    UploadedFile[]
+  blocksCreated    UserBlock[]       @relation("Blocker")
+  blocksReceived   UserBlock[]       @relation("Blocked")
+  inviteLinks      InviteLink[]
 }
 
 model Story {
@@ -60,28 +63,28 @@ model Story {
   userId        String
   user          User     @relation("UserStories", fields: [userId], references: [id], onDelete: Cascade)
   mediaUrl      String
-  mediaType     String   // image, video
+  mediaType     String // image, video
   caption       String?
   privacy       String   @default("PUBLIC") // PUBLIC, CONTACTS, CLOSE_FRIENDS, CUSTOM
   expiresAt     DateTime
-  allowedUsers  String?  // JSON string of user IDs for CUSTOM privacy
+  allowedUsers  String? // JSON string of user IDs for CUSTOM privacy
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   isArchived    Boolean  @default(false)
   isHighlight   Boolean  @default(false)
   highlightName String?
 
-  views         StoryView[]     @relation("StoryViewsRel")
-  reactions     StoryReaction[] @relation("StoryReactionsRel")
+  views     StoryView[]     @relation("StoryViewsRel")
+  reactions StoryReaction[] @relation("StoryReactionsRel")
 }
 
 model StoryView {
-  id        String   @id @default(uuid())
-  storyId   String
-  userId    String
-  story     Story    @relation("StoryViewsRel", fields: [storyId], references: [id], onDelete: Cascade)
-  user      User     @relation("UserStoryViews", fields: [userId], references: [id], onDelete: Cascade)
-  viewedAt  DateTime @default(now())
+  id       String   @id @default(uuid())
+  storyId  String
+  userId   String
+  story    Story    @relation("StoryViewsRel", fields: [storyId], references: [id], onDelete: Cascade)
+  user     User     @relation("UserStoryViews", fields: [userId], references: [id], onDelete: Cascade)
+  viewedAt DateTime @default(now())
 
   @@unique([storyId, userId])
 }
@@ -97,7 +100,6 @@ model StoryReaction {
 
   @@unique([storyId, userId, emoji])
 }
-
 
 model AvatarItem {
   id        String   @id @default(uuid())
@@ -115,6 +117,7 @@ model Group {
   avatarImage String?
   initials    String?
   inviteLink  String?       @unique
+  slug        String?       @unique
   isPublic    Boolean       @default(false)
   creatorId   String
   creator     User          @relation("CreatedGroups", fields: [creatorId], references: [id])
@@ -147,6 +150,7 @@ model Channel {
   ownerId     String
   owner       User            @relation("CreatedChannels", fields: [ownerId], references: [id])
   inviteLink  String?         @unique
+  slug        String?         @unique
   isPublic    Boolean         @default(false)
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
@@ -167,18 +171,18 @@ model ChannelMember {
 }
 
 model ChannelPost {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   channelId   String
   authorId    String
   content     String?
   attachments String? // JSON array of urls
-  views       Int     @default(0)
-  isPinned    Boolean @default(false)
+  views       Int      @default(0)
+  isPinned    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  channel     Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author      User    @relation(fields: [authorId], references: [id])
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
 
   reactions   ChannelReaction[]
   comments    ChannelComment[]
@@ -200,28 +204,27 @@ model ChannelComment {
 }
 
 model ChannelPostView {
-  id        String      @id @default(uuid())
-  userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postId    String
-  post      ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
-  viewedAt  DateTime    @default(now())
+  id       String      @id @default(uuid())
+  userId   String
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId   String
+  post     ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  viewedAt DateTime    @default(now())
 
   @@unique([userId, postId])
   @@index([postId])
 }
 
 model ChannelReaction {
-  id        String      @id @default(uuid())
-  emoji     String
-  userId    String
-  user      User        @relation(fields: [userId], references: [id])
-  postId    String
-  post      ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  id     String      @id @default(uuid())
+  emoji  String
+  userId String
+  user   User        @relation(fields: [userId], references: [id])
+  postId String
+  post   ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@unique([userId, postId, emoji])
 }
-
 
 model Message {
   id        String   @id @default(uuid())
@@ -242,9 +245,9 @@ model Message {
   replyTo   Message?  @relation("MessageReplies", fields: [replyToId], references: [id])
   replies   Message[] @relation("MessageReplies")
 
-  status    String     @default("sent")
-  isPinned  Boolean    @default(false)
-  isEdited  Boolean    @default(false)
+  status    String           @default("sent")
+  isPinned  Boolean          @default(false)
+  isEdited  Boolean          @default(false)
   reactions Reaction[]
   receipts  MessageReceipt[]
   saves     SavedMessage[]
@@ -277,7 +280,7 @@ model ChatState {
   id         String    @id @default(uuid())
   userId     String
   chatId     String
-  chatType   String    // direct, group, channel
+  chatType   String // direct, group, channel
   unread     Int       @default(0)
   mutedUntil DateTime?
   pinned     Boolean   @default(false)
@@ -286,7 +289,7 @@ model ChatState {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, chatId, chatType])
   @@index([userId, updatedAt])
@@ -299,8 +302,8 @@ model MessageReceipt {
   deliveredAt DateTime?
   readAt      DateTime?
 
-  message     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
   @@index([userId, readAt])
@@ -312,13 +315,13 @@ model Poll {
   chatType  String    @default("group") // direct, group, channel
   creatorId String
   question  String
-  options   String    // JSON
+  options   String // JSON
   isAnon    Boolean   @default(false)
   multiple  Boolean   @default(false)
   closesAt  DateTime?
   createdAt DateTime  @default(now())
 
-  creator   User      @relation("CreatedPolls", fields: [creatorId], references: [id], onDelete: Cascade)
+  creator User @relation("CreatedPolls", fields: [creatorId], references: [id], onDelete: Cascade)
 
   @@index([chatId, chatType])
 }
@@ -328,11 +331,11 @@ model SavedMessage {
   userId    String
   messageId String
   note      String?
-  tags      String?  // JSON
+  tags      String? // JSON
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([userId, messageId])
 }
@@ -358,7 +361,36 @@ model UploadedFile {
   storage      String   @default("local")
   createdAt    DateTime @default(now())
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+}
+
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+model InviteLink {
+  id         String    @id @default(uuid())
+  targetType String
+  targetId   String
+  inviteCode String    @unique
+  createdBy  String
+  creator    User      @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  expiresAt  DateTime?
+  maxUses    Int?
+  usesCount  Int       @default(0)
+  isRevoked  Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  @@index([targetType, targetId])
+  @@index([createdBy])
 }

@@ -61,6 +61,9 @@ export const chatStateRepository = {
   touch: async (userId: string, chatId: string, chatType: ChatType) =>
     chatStateRepository.upsert({ userId, chatId, chatType, unreadDelta: 0 }),
 
+  remove: async (userId: string, chatId: string, chatType: ChatType) =>
+    db.chatState.deleteMany({ where: { userId, chatId, chatType } }),
+
   incrementUnread: async (userId: string, chatId: string, chatType: ChatType) =>
     chatStateRepository.upsert({ userId, chatId, chatType, unreadDelta: 1, archived: false }),
 

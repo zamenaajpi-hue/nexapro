@@ -71,7 +71,12 @@ export const authController = {
         res.status(400).json(validationError(err));
         return;
       }
-      res.status(err.message === 'Invalid credentials' || err.message === 'Invalid cloud password' ? 401 : 500).json({ error: err.message || 'Login failed' });
+      if (err.message === 'Invalid credentials' || err.message === 'Invalid cloud password') {
+        res.status(401).json({ error: 'Invalid credentials' });
+        return;
+      }
+      console.error(err);
+      res.status(500).json({ error: 'Login failed' });
     }
   },
 

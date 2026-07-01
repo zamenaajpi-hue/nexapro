@@ -4,6 +4,7 @@ import { chatStateRepository } from '../repositories/chat-state.repository';
 import { createChannelSchema, updateChannelSchema } from '../validations/group.schema';
 import { generateGroupAvatar } from '../../utils/avatarGenerator';
 import { safeUser } from '../utils/safeUser';
+import { isSlugAvailable, makeUniqueSlug, normalizeSlug, validateSlug } from '../publicLinks/publicLink.service';
 
 export const safeChannelMember = (member: any) => ({ ...member, user: member.user ? safeUser(member.user) : member.user });
 export const safeChannelPayload = (channel: any) => ({
@@ -56,13 +57,23 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
 
   socket.on('channel:create', async (payload: any) => {
     try {
-      const { name, description, isPublic } = createChannelSchema.parse(payload);
+      const { name, description, isPublic, slug: requestedSlug } = createChannelSchema.parse(payload);
       const generatedAvatar = generateGroupAvatar(name);
+      const slug = isPublic
+        ? requestedSlug
+          ? normalizeSlug(requestedSlug)
+          : await makeUniqueSlug(name)
+        : null;
+      if (slug && (validateSlug(slug) || !(await isSlugAvailable(slug)))) {
+        socket.emit('channel:create:error', { error: 'Эта ссылка уже занята или имеет неверный формат' });
+        return;
+      }
 
       const newChannel = await channelRepository.create({
         name,
         description,
         isPublic: isPublic || false,
+        slug,
         ownerId: userId,
         avatarColor: '#'+Math.floor(Math.random()*16777215).toString(16),
         avatarImage: generatedAvatar,
@@ -85,16 +96,24 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
 
   socket.on('channel:update', async (payload: any) => {
     try {
-      const { id, name, avatarImage } = updateChannelSchema.parse(payload);
+      const { id, name, avatarImage, description, isPublic, slug: requestedSlug } = updateChannelSchema.parse(payload);
       const access = await getChannelAccess(id);
       if (!access.canManage) {
         socket.emit('error', { message: 'Access denied' });
         return;
       }
       
+      const slug = requestedSlug === undefined ? undefined : normalizeSlug(requestedSlug);
+      if (slug && (validateSlug(slug) || !(await isSlugAvailable(slug, { type: 'channel', id })))) {
+        socket.emit('channel:update:error', { error: 'Эта ссылка уже занята или имеет неверный формат' });
+        return;
+      }
       const updatedChannel = await channelRepository.update(id, { 
         name, 
         avatarImage,
+        description,
+        isPublic,
+        slug,
         initials: name ? name.substring(0, 2).toUpperCase() : undefined
       }, true);
       
@@ -113,7 +132,7 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
       if (typeof channelId !== 'string' || typeof targetUserId !== 'string') return;
       const access = await getChannelAccess(channelId);
       if (!access.canManage) {
-        socket.emit('error', { message: 'Access denied' });
+        socket.emit('channel:add-member:error', { error: 'Недостаточно прав для добавления подписчиков' });
         return;
       }
 
@@ -128,9 +147,37 @@ export const handleChannels = (io: SocketIOServer, socket: any, onlineUsers: Map
           io.to(targetSocket).emit('channel:new', { ...safeChannelPayload(updatedChannel), isChannel: true });
           io.to(targetSocket).emit('chat:states', await chatStateRepository.findForUser(targetUserId));
         }
+        socket.emit('channel:add-member:success', { channelId, userId: targetUserId });
       }
     } catch (err) {
       console.error('[DB_ERR] Add channel member failed:', err);
+      socket.emit('channel:add-member:error', { error: 'Не удалось добавить подписчика' });
+    }
+  });
+
+  socket.on('channel:leave', async (payload: any) => {
+    try {
+      const { channelId } = payload || {};
+      if (typeof channelId !== 'string') return;
+      const access = await getChannelAccess(channelId);
+      if (!access.channel || !access.member) {
+        socket.emit('channel:leave:error', { channelId, error: 'Вы не подписаны на этот канал' });
+        return;
+      }
+      if (access.channel.ownerId === userId || access.member.role === 'owner') {
+        socket.emit('channel:leave:error', { channelId, error: 'Сначала передайте права владельца другому участнику' });
+        return;
+      }
+
+      await channelRepository.removeMember(channelId, userId);
+      await chatStateRepository.remove(userId, channelId, 'channel');
+      socket.emit('channel:left', { channelId });
+
+      const updatedChannel = await channelRepository.findById(channelId, true);
+      if (updatedChannel) emitChannelUpdated(updatedChannel);
+    } catch (err) {
+      console.error('[DB_ERR] Leave channel failed:', err);
+      socket.emit('channel:leave:error', { error: 'Не удалось покинуть канал' });
     }
   });
 

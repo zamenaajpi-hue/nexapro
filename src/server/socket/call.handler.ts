@@ -99,6 +99,10 @@ export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<st
       socket.emit('call:error', { error: 'Invalid call request' });
       return;
     }
+    if (to === userId) {
+      socket.emit('call:error', { error: 'Cannot call yourself' });
+      return;
+    }
     const sender = onlineUsers.get(userId);
     const callerName = sender?.nickname || sender?.username || 'Nexa';
 
@@ -161,6 +165,7 @@ export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<st
       }
 
       const room = getGroupCallRoom(groupId);
+      const isNewCall = room.participants.size === 0;
       room.memberIds = access.group.members.map((member: any) => member.userId);
       const existingParticipantIds = Array.from(room.participants.keys()).filter((id) => id !== userId);
       const participant = {
@@ -173,6 +178,18 @@ export const handleCalls = (io: SocketIOServer, socket: any, onlineUsers: Map<st
 
       room.participants.set(userId, participant);
       socket.join(groupCallRoomName(groupId));
+      if (isNewCall) {
+        const incomingPayload = {
+          groupId,
+          from: safeCallUserPayload(sender),
+          participants: serializeGroupCallRoom(room).participants,
+        };
+        room.memberIds.forEach((memberId) => {
+          if (memberId === userId) return;
+          const memberSocketId = onlineUsers.get(memberId)?.socketId;
+          if (memberSocketId) io.to(memberSocketId).emit('group-call:incoming', incomingPayload);
+        });
+      }
       socket.emit('group-call:joined', {
         ...serializeGroupCallRoom(room),
         existingParticipantIds,

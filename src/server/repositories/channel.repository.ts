@@ -37,6 +37,9 @@ export const channelRepository = {
       create: { userId, channelId, role: 'subscriber' },
     }),
 
+  removeMember: async (channelId: string, userId: string) =>
+    db.channelMember.deleteMany({ where: { channelId, userId } }),
+
   setMemberRole: async (channelId: string, userId: string, role: 'admin' | 'subscriber') =>
     db.channelMember.update({
       where: { userId_channelId: { userId, channelId } },

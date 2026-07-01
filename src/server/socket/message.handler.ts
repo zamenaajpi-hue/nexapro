@@ -99,6 +99,17 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
       }
       
       const directRecipientSocket = !isGroup ? onlineUsers.get(to)?.socketId : null;
+      if (!isGroup && to !== userId) {
+        const { db } = await import('../../services/db');
+        const blocked = await db.userBlock.findUnique({
+          where: { blockerId_blockedId: { blockerId: to, blockedId: userId } },
+          select: { id: true },
+        });
+        if (blocked) {
+          socket.emit('message:blocked', { userId: to, message: 'Этот пользователь вас заблокировал' });
+          return;
+        }
+      }
       const dbMsg = await messageRepository.create({
         text: text || '',
         type: type || 'text',
@@ -328,10 +339,10 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
     }
   });
 
-  socket.on('typing', async (payload: { chatId: string; isTyping: boolean } | null | undefined) => {
+  socket.on('typing', async (payload: { chatId: string; isTyping: boolean; action?: string } | null | undefined) => {
     try {
       if (!payload || typeof payload !== 'object') return;
-      const { chatId, isTyping } = payload;
+      const { chatId, isTyping, action } = payload;
       if (!chatId) return;
 
       const user = onlineUsers.get(userId);
@@ -349,7 +360,8 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
                 chatId,
                 userId,
                 userName,
-                isTyping
+                isTyping,
+                action,
               });
             }
           }
@@ -361,7 +373,8 @@ export const handleMessages = (io: SocketIOServer, socket: any, onlineUsers: Map
             chatId: userId,
             userId,
             userName,
-            isTyping
+            isTyping,
+            action,
           });
         }
       }

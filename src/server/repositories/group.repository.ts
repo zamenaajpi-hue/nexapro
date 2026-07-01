@@ -37,6 +37,9 @@ export const groupRepository = {
       create: { userId, groupId, role: 'member' },
     }),
 
+  removeMember: async (groupId: string, userId: string) =>
+    db.groupMember.deleteMany({ where: { groupId, userId } }),
+
   deleteWithRelations: async (id: string) => {
     const messages = await db.message.findMany({
       where: { toGroupId: id },
